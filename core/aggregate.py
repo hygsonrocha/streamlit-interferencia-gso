@@ -31,6 +31,9 @@ def resumir_agregado_por_frequencia(df_resultados: pd.DataFrame) -> pd.DataFrame
         })
     return pd.DataFrame(linhas).sort_values(by="frequencia_MHz").reset_index(drop=True)
 
+# resumir_agregado_total() só é fisicamente consistente como “agregado cocanal total” 
+# se as estações estiverem no mesmo canal/frequência e com a mesma banda de referência 
+# de ruído.
 
 def resumir_agregado_total(df_resultados: pd.DataFrame) -> pd.DataFrame:
     df_vis = df_resultados[df_resultados["visible_flag"]].copy()

@@ -1,5 +1,3 @@
-from pathlib import Path
-import io
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -11,12 +9,12 @@ from core.aggregate import resumir_agregado_por_frequencia, resumir_agregado_tot
 from core.sweep import calcular_i_agg_total_e_in, build_longitude_grid, extrair_faixas_contiguas
 
 st.set_page_config(page_title="Interferência agregada em satélite GSO", layout="wide")
-st.title("Simulação de interferência agregada de estações de radiodifusão em satélite GSO")
+st.title("Simulação de interferência agregada de estações de TV digital em satélites GSO")
 # st.caption("Aplicativo Streamlit construído a partir da lógica dos scripts de cálculo e de varredura de longitude GSO.")
 
 
 def dataframe_to_csv_bytes(df: pd.DataFrame) -> bytes:
-    return df.to_csv(index=False, sep=';', decimal='.', encoding='utf-8-sig').encode('utf-8-sig')
+    return df.to_csv(index=False, sep=";", decimal=".").encode("utf-8-sig")
 
 
 def montar_params_tx_ui():
@@ -111,7 +109,9 @@ def plot_crescimento(df_resultados: pd.DataFrame):
         return None
     df_ord = df_vis.sort_values(by="i_dBW", ascending=False).reset_index(drop=True)
     df_ord["i_agg_cumul_W"] = df_ord["i_W"].cumsum()
-    df_ord["i_agg_cumul_dBW"] = df_ord["i_agg_cumul_W"].apply(lambda x: -float('inf') if x <= 0 else 10.0 * np.log10(x))
+    df_ord["i_agg_cumul_dBW"] = -np.inf
+    mask = df_ord["i_agg_cumul_W"] > 0
+    df_ord.loc[mask, "i_agg_cumul_dBW"] = 10.0 * np.log10(df_ord.loc[mask, "i_agg_cumul_W"])
     x = np.arange(1, len(df_ord) + 1)
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.plot(x, df_ord["i_agg_cumul_dBW"])
@@ -170,6 +170,7 @@ def plot_varredura(df_scan: pd.DataFrame):
         return None
     fig, ax = plt.subplots(figsize=(10, 6))
     for g_r, grupo in df_scan.groupby("g_r_max_dBi", sort=True):
+        grupo = grupo.sort_values("gso_lon_deg")
         ax.plot(grupo["gso_lon_deg"], grupo["i_over_n_agg_total_dB"], label=f"g_r_max={g_r:.1f} dBi")
     ax.axhline(float(df_scan["benchmark_i_over_n_dB"].iloc[0]), linestyle="--")
     ax.set_xlabel("Longitude GSO [graus]")

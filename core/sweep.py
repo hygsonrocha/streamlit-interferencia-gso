@@ -102,8 +102,13 @@ def calcular_i_agg_total_e_in(estacoes_expandidas: list[dict], params_rx_sat_bas
 
 
 def build_longitude_grid(lon_min_deg: float, lon_max_deg: float, lon_step_deg: float) -> np.ndarray:
-    n_steps = int(round((lon_max_deg - lon_min_deg) / lon_step_deg))
-    return np.round(lon_min_deg + np.arange(n_steps + 1) * lon_step_deg, 10)
+    if lon_step_deg <= 0:
+        raise ValueError("lon_step_deg deve ser positivo.")
+    if lon_max_deg < lon_min_deg:
+        raise ValueError("lon_max_deg deve ser maior ou igual a lon_min_deg.")
+
+    grid = np.arange(lon_min_deg, lon_max_deg + 0.5 * lon_step_deg, lon_step_deg, dtype=float)
+    return np.round(grid, 10)
 
 
 def extrair_faixas_contiguas(df: pd.DataFrame, lon_step_deg: float) -> pd.DataFrame:

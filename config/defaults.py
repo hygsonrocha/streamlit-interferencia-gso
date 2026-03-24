@@ -18,7 +18,7 @@ params_tx_default = {
 
 params_rx_sat = {
     "sat_id": "SECOMSAT-5-30W",
-    "gso_lon_deg": -50.0,
+    "gso_lon_deg": -30.0,
     "pol_rx": "M",
     "t_sys_K": 700.0,
     "l_rx_dB": 0.0,
