@@ -31,10 +31,47 @@ params_rx_sat = {
     "apply_low_elevation_excess_loss": True,
 }
 
-tx_pattern = {
-    "angle_deg": np.array([0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 70, 80, 90], dtype=float),
-    "e_rel": np.array([1.00, 0.92, 0.55, 0.20, 0.03, 0.20, 0.16, 0.08, 0.03, 0.08, 0.10, 0.06, 0.03, 0.015, 0.008, 0.005], dtype=float),
-}
+
+def build_tx_pattern_bt1195_fig19():
+    """
+    Padrão vertical proxy em alta resolução, compatível com a Figura 19 da Rec. ITU-R BT.1195-1.
+
+    Observações:
+    - os pontos de controle abaixo foram ajustados para reproduzir visualmente o formato da figura;
+    - o padrão é normalizado em campo: E/Emax;
+    - a malha final é densa (0,1°), para deixar o gráfico do app suave.
+    """
+
+    # Pontos de controle aproximados da Figura 19 (ângulo em graus, E/Emax)
+    ctrl_angle_deg = np.array([
+         0,   1,   2,   3,   4,   5,   6,   7,   8,   9,  10,
+        11,  12,  13,  14,  15,  16,  17,  18,  19,  20,
+        21,  22,  23,  24,  25,  26,  27,  28,  29,  30,
+        31,  32,  33,  34,  35,  36,  37,  38,  39,  40,
+        42,  44,  46,  48,  50,  52,  55,  60,  65,  70,  75,  80,  85,  90
+    ], dtype=float)
+
+    ctrl_e_rel = np.array([
+        1.00, 0.995, 0.985, 0.970, 0.950, 0.920, 0.880, 0.830, 0.770, 0.700, 0.620,
+        0.540, 0.460, 0.380, 0.300, 0.220, 0.150, 0.090, 0.040, 0.030, 0.050,
+        0.090, 0.140, 0.180, 0.195, 0.200, 0.195, 0.185, 0.165, 0.130, 0.090,
+        0.040, 0.030, 0.070, 0.130, 0.180, 0.198, 0.200, 0.188, 0.165, 0.140,
+        0.090, 0.045, 0.030, 0.055, 0.080, 0.100, 0.105, 0.090, 0.070, 0.050, 0.035, 0.025, 0.020, 0.018
+    ], dtype=float)
+
+    angle_deg = np.arange(0.0, 90.0 + 0.1, 0.1, dtype=float)
+    e_rel = np.interp(angle_deg, ctrl_angle_deg, ctrl_e_rel)
+
+    # Garantias numéricas
+    e_rel = np.clip(e_rel, 1e-6, 1.0)
+
+    return {
+        "angle_deg": angle_deg,
+        "e_rel": e_rel,
+    }
+
+
+tx_pattern = build_tx_pattern_bt1195_fig19()
 
 FREQ_INTERF_MHZ = 300.0
 
