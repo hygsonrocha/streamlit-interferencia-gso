@@ -116,11 +116,28 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
     ev_dB = 20.0 * np.log10(ev_rel)
 
     g_t_dir_dBi = g_t_max_dBi + eh_dB + ev_dB
+    g_t_dir_dBd = g_t_dir_dBi - 2.15
 
-    g_r_dir_dBi = ganho_antena_gso_s672(psi_deg=gso_rx_boresight_offaxis_deg, gmax_dbi=g_r_max_dBi, psi_b_deg=psi_b_deg, ln_db=ln_db, lf_db=lf_db)
+    g_r_dir_dBi = ganho_antena_gso_s672(
+        psi_deg=gso_rx_boresight_offaxis_deg,
+        gmax_dbi=g_r_max_dBi,
+        psi_b_deg=psi_b_deg,
+        ln_db=ln_db,
+        lf_db=lf_db,
+    )
     g_r_dir_offset_dB = g_r_max_dBi - g_r_dir_dBi
 
     p_ant_dBW = p_tx_dBW - l_tx_dB
+
+    # ERP máxima da estação modelo
+    erp_max_dBW = p_ant_dBW + g_t_max_dBd
+    erp_max_kW = dBW_to_W(erp_max_dBW) / 1000.0
+
+    # ERP/EIRP na direção do satélite
+    eirp_dir_dBW = p_ant_dBW + g_t_dir_dBi
+    erp_dir_dBW = p_ant_dBW + g_t_dir_dBd
+    erp_dir_kW = dBW_to_W(erp_dir_dBW) / 1000.0
+
     n_dBW = -228.6 + 10.0 * np.log10(t_sys_K) + 10.0 * np.log10(b_tx_Hz)
 
     if visible_flag:
@@ -190,7 +207,6 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
         "Eh_dB": eh_dB,
         "p_tx_dBW": p_tx_dBW,
         "p_ant_dBW": p_ant_dBW,
-        "erp_max_kW": erp_max_kW,
         "tx_f_min_MHz": tx_f_min_MHz,
         "tx_f_max_MHz": tx_f_max_MHz,
         "sat_id": sat_id,
@@ -221,7 +237,6 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
         "pattern_clipped_flag": pattern_clipped_flag,
         "Ev_rel": ev_rel,
         "Ev_dB": ev_dB,
-        "g_t_dir_dBi": g_t_dir_dBi,
         "gso_rx_boresight_offaxis_deg": gso_rx_boresight_offaxis_deg,
         "g_r_dir_dBi": g_r_dir_dBi,
         "g_r_dir_offset_dB": g_r_dir_offset_dB,
@@ -231,11 +246,17 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
         "l_fs_dB": l_fs_dB,
         "l_low_elev_excess_dB": l_low_elev_excess_dB,
         "l_path_dB": l_path_dB,
-        "eirp_dir_dBW": eirp_dir_dBW,
         "i_dBW": i_dBW,
         "i_W": i_W,
         "n_dBW": n_dBW,
         "i_over_n_dB": i_over_n_dB,
         "delta_t_over_t_pct": delta_t_over_t_pct,
         "benchmark_ok": benchmark_ok,
+        "g_t_dir_dBi": g_t_dir_dBi,
+        "g_t_dir_dBd": g_t_dir_dBd,
+        "erp_max_dBW": erp_max_dBW,
+        "erp_max_kW": erp_max_kW,
+        "eirp_dir_dBW": eirp_dir_dBW,
+        "erp_dir_dBW": erp_dir_dBW,
+        "erp_dir_kW": erp_dir_kW,
     }

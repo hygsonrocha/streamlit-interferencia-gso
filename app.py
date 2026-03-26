@@ -188,8 +188,30 @@ params_rx_ui = montar_params_rx_ui()
 tab1, tab2 = st.tabs(["Cenário único", "Varredura de longitude GSO"])
 
 with tab1:
-    st.subheader("Estações de radiodifusão")
-    df_estacoes_edit = st.data_editor(pd.DataFrame(estacoes_exemplo), num_rows="dynamic", use_container_width=True)
+    col_left, col_right = st.columns([4, 1])
+
+    with col_left:
+        st.subheader("Estações de radiodifusão")
+        df_estacoes_edit = st.data_editor(
+            pd.DataFrame(estacoes_exemplo),
+            num_rows="dynamic",
+            use_container_width=True
+        )
+
+    with col_right:
+        # Cálculo da ERP máxima da estação modelo
+        l_tx_model_dB = (
+            float(params_tx_ui["line_att_dB_per_100m"]) * (float(params_tx_ui["line_length_m"]) / 100.0)
+            + float(params_tx_ui["accessory_losses_dB"])
+        )
+        p_tx_model_dBW = 10.0 * np.log10(float(params_tx_ui["p_tx_kW"]) * 1000.0)
+        p_ant_model_dBW = p_tx_model_dBW - l_tx_model_dB
+        erp_max_model_dBW = p_ant_model_dBW + float(params_tx_ui["g_t_max_dBd"])
+        erp_max_model_kW = 10.0 ** (erp_max_model_dBW / 10.0) / 1000.0
+
+        st.subheader("Estação modelo")
+        st.metric("ERP máxima [kW]", f"{erp_max_model_kW:.2f}")
+        st.caption("Calculada a partir da potência, perdas de linha e ganho máximo da antena.")
 
     if st.button("Rodar simulação", type="primary"):
         try:
@@ -211,7 +233,25 @@ with tab1:
                     st.error("O agregado excede o benchmark preliminar.")
 
             st.subheader("Resultados por estação")
-            st.dataframe(df_resultados, use_container_width=True)
+
+            cols_resultados_view = [
+                "municipio",
+                "uf",
+                "frequencia_MHz",
+                "az_to_sat_deg",
+                "elev_deg",
+                "g_t_dir_dBd",
+                "erp_dir_kW",
+                "eirp_dir_dBW",
+                "i_dBW",
+                "i_over_n_dB",
+                "visible_flag",
+                "visibility_reason",
+            ]
+
+            cols_resultados_view = [c for c in cols_resultados_view if c in df_resultados.columns]
+
+            st.dataframe(df_resultados[cols_resultados_view], use_container_width=True)
 
             st.subheader("Resumo agregado por frequência")
             st.dataframe(df_agregado_freq, use_container_width=True)
