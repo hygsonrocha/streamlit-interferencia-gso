@@ -19,17 +19,80 @@ def expandir_estacoes_com_defaults(estacoes: list[dict], params_tx_default: dict
 
 def validar_estacoes(estacoes: list[dict]) -> None:
     campos_obrigatorios = {"municipio", "uf", "latitude_deg", "longitude_deg", "frequencia_MHz"}
+
+    if not estacoes:
+        raise ValueError("A lista de estações está vazia.")
+
     for i, estacao in enumerate(estacoes, start=1):
         faltando = campos_obrigatorios - set(estacao.keys())
         if faltando:
             raise ValueError(f"Estação #{i} sem campos obrigatórios: {sorted(faltando)}")
 
+        municipio = str(estacao["municipio"]).strip()
+        uf = str(estacao["uf"]).strip()
+
+        if not municipio:
+            raise ValueError(f"Estação #{i} com 'municipio' vazio.")
+        if not uf:
+            raise ValueError(f"Estação #{i} com 'uf' vazio.")
+
+        try:
+            lat = float(estacao["latitude_deg"])
+            lon = float(estacao["longitude_deg"])
+            freq = float(estacao["frequencia_MHz"])
+        except Exception as e:
+            raise ValueError(f"Estação #{i} contém latitude/longitude/frequência inválidas: {e}")
+
+        if not (-90.0 <= lat <= 90.0):
+            raise ValueError(f"Estação #{i} com latitude fora do intervalo [-90, 90].")
+        if not (-180.0 <= lon <= 180.0):
+            raise ValueError(f"Estação #{i} com longitude fora do intervalo [-180, 180].")
+        if freq <= 0.0:
+            raise ValueError(f"Estação #{i} com frequência não positiva.")
+
 
 def validar_tx_pattern(tx_pattern: dict) -> None:
     if "angle_deg" not in tx_pattern or "e_rel" not in tx_pattern:
         raise ValueError("tx_pattern deve conter 'angle_deg' e 'e_rel'.")
-    if len(tx_pattern["angle_deg"]) != len(tx_pattern["e_rel"]):
+
+    angle_deg = np.asarray(tx_pattern["angle_deg"], dtype=float)
+    e_rel = np.asarray(tx_pattern["e_rel"], dtype=float)
+
+    if len(angle_deg) != len(e_rel):
         raise ValueError("tx_pattern['angle_deg'] e tx_pattern['e_rel'] devem ter o mesmo tamanho.")
+    if len(angle_deg) == 0:
+        raise ValueError("tx_pattern não pode ser vazio.")
+    if np.any(np.diff(angle_deg) < 0):
+        raise ValueError("'angle_deg' deve estar em ordem crescente.")
+    if np.any(e_rel <= 0):
+        raise ValueError("'e_rel' deve conter apenas valores positivos.")
+
+
+def calcular_metricas_estacao_modelo(params_tx: dict) -> dict:
+    """
+    Calcula métricas da estação modelo a partir dos parâmetros da sidebar.
+    Centraliza o cálculo da ERP máxima para evitar duplicação no app.
+    """
+    p_tx_kW = float(params_tx["p_tx_kW"])
+    g_t_max_dBd = float(params_tx["g_t_max_dBd"])
+    line_length_m = float(params_tx["line_length_m"])
+    line_att_dB_per_100m = float(params_tx["line_att_dB_per_100m"])
+    accessory_losses_dB = float(params_tx["accessory_losses_dB"])
+
+    l_tx_dB = line_att_dB_per_100m * (line_length_m / 100.0) + accessory_losses_dB
+    p_tx_dBW = 10.0 * np.log10(p_tx_kW * 1000.0)
+    p_ant_dBW = p_tx_dBW - l_tx_dB
+
+    erp_max_dBW = p_ant_dBW + g_t_max_dBd
+    erp_max_kW = dBW_to_W(erp_max_dBW) / 1000.0
+
+    return {
+        "l_tx_dB": l_tx_dB,
+        "p_tx_dBW": p_tx_dBW,
+        "p_ant_dBW": p_ant_dBW,
+        "erp_max_dBW": erp_max_dBW,
+        "erp_max_kW": erp_max_kW,
+    }
 
 
 def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_pattern: dict) -> dict:
@@ -71,10 +134,15 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
     e_rel = np.asarray(tx_pattern["e_rel"], dtype=float)
 
     h_station_m = site_alt_m + ant_height_m
+
     l_tx_dB = line_att_dB_per_100m * (line_length_m / 100.0) + accessory_losses_dB
     p_tx_dBW = 10.0 * np.log10(p_tx_kW * 1000.0)
     g_t_max_dBi = g_t_max_dBd + 2.15
-    erp_max_kW = p_tx_kW * 10.0 ** ((g_t_max_dBd - l_tx_dB) / 10.0)
+
+    p_ant_dBW = p_tx_dBW - l_tx_dB
+
+    erp_max_dBW = p_ant_dBW + g_t_max_dBd
+    erp_max_kW = dBW_to_W(erp_max_dBW) / 1000.0
 
     tx_f_min_MHz = f_tx_center_MHz - (b_tx_Hz / 1e6) / 2.0
     tx_f_max_MHz = f_tx_center_MHz + (b_tx_Hz / 1e6) / 2.0
@@ -127,17 +195,11 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
     )
     g_r_dir_offset_dB = g_r_max_dBi - g_r_dir_dBi
 
-    p_ant_dBW = p_tx_dBW - l_tx_dB
-
-    # ERP máxima da estação modelo
-    erp_max_dBW = p_ant_dBW + g_t_max_dBd
-    erp_max_kW = dBW_to_W(erp_max_dBW) / 1000.0
-
-    # ERP/EIRP na direção do satélite
     eirp_dir_dBW = p_ant_dBW + g_t_dir_dBi
     erp_dir_dBW = p_ant_dBW + g_t_dir_dBd
     erp_dir_kW = dBW_to_W(erp_dir_dBW) / 1000.0
 
+    # No modelo atual, N = kTB é calculado na mesma banda do interferente (cenário cocanal homogêneo).
     n_dBW = -228.6 + 10.0 * np.log10(t_sys_K) + 10.0 * np.log10(b_tx_Hz)
 
     if visible_flag:
@@ -150,7 +212,6 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
 
         if np.isinf(l_low_elev_excess_dB):
             l_path_dB = np.nan
-            eirp_dir_dBW = np.nan
             i_dBW = np.nan
             i_W = 0.0
             i_over_n_dB = np.nan
@@ -160,7 +221,6 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
             visibility_reason = "Descartada pela perda infinita do modelo de baixa elevação."
         else:
             l_path_dB = l_fs_dB + l_atm_dB + l_low_elev_excess_dB
-            eirp_dir_dBW = p_ant_dBW + g_t_dir_dBi
             i_dBW = eirp_dir_dBW - l_path_dB + g_r_dir_dBi - l_pol_mismatch_dB - l_rx_dB
             i_W = dBW_to_W(i_dBW)
             i_over_n_dB = i_dBW - n_dBW
@@ -171,7 +231,6 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
         l_fs_dB = np.nan
         l_low_elev_excess_dB = np.nan
         l_path_dB = np.nan
-        eirp_dir_dBW = np.nan
         i_dBW = np.nan
         i_W = 0.0
         i_over_n_dB = np.nan
@@ -207,6 +266,8 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
         "Eh_dB": eh_dB,
         "p_tx_dBW": p_tx_dBW,
         "p_ant_dBW": p_ant_dBW,
+        "erp_max_dBW": erp_max_dBW,
+        "erp_max_kW": erp_max_kW,
         "tx_f_min_MHz": tx_f_min_MHz,
         "tx_f_max_MHz": tx_f_max_MHz,
         "sat_id": sat_id,
@@ -237,6 +298,8 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
         "pattern_clipped_flag": pattern_clipped_flag,
         "Ev_rel": ev_rel,
         "Ev_dB": ev_dB,
+        "g_t_dir_dBi": g_t_dir_dBi,
+        "g_t_dir_dBd": g_t_dir_dBd,
         "gso_rx_boresight_offaxis_deg": gso_rx_boresight_offaxis_deg,
         "g_r_dir_dBi": g_r_dir_dBi,
         "g_r_dir_offset_dB": g_r_dir_offset_dB,
@@ -246,17 +309,13 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
         "l_fs_dB": l_fs_dB,
         "l_low_elev_excess_dB": l_low_elev_excess_dB,
         "l_path_dB": l_path_dB,
+        "eirp_dir_dBW": eirp_dir_dBW,
+        "erp_dir_dBW": erp_dir_dBW,
+        "erp_dir_kW": erp_dir_kW,
         "i_dBW": i_dBW,
         "i_W": i_W,
         "n_dBW": n_dBW,
         "i_over_n_dB": i_over_n_dB,
         "delta_t_over_t_pct": delta_t_over_t_pct,
         "benchmark_ok": benchmark_ok,
-        "g_t_dir_dBi": g_t_dir_dBi,
-        "g_t_dir_dBd": g_t_dir_dBd,
-        "erp_max_dBW": erp_max_dBW,
-        "erp_max_kW": erp_max_kW,
-        "eirp_dir_dBW": eirp_dir_dBW,
-        "erp_dir_dBW": erp_dir_dBW,
-        "erp_dir_kW": erp_dir_kW,
     }
