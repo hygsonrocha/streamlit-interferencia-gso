@@ -68,6 +68,9 @@ def formatar_resultados_para_exibicao(df_resultados: pd.DataFrame) -> pd.DataFra
         "municipio",
         "uf",
         "frequencia_MHz",
+        "b_tx_Hz",
+        "b_rx_Hz",
+        "b_ov_Hz",
         "az_to_sat_deg",
         "elev_deg",
         "theta_eval_used_deg",
@@ -75,8 +78,12 @@ def formatar_resultados_para_exibicao(df_resultados: pd.DataFrame) -> pd.DataFra
         "g_t_dir_dBd",
         "erp_dir_kW",
         "eirp_dir_dBW",
+        "eirp_density_dBW_per_Hz",
+        "i_density_dBW_per_Hz",
         "i_dBW",
+        "n0_dBW_per_Hz",
         "n_dBW",
+        "i_over_n0_dBHz",
         "i_over_n_dB",
         "delta_t_over_t_pct",
         "visible_flag",
@@ -89,6 +96,9 @@ def formatar_resultados_para_exibicao(df_resultados: pd.DataFrame) -> pd.DataFra
         "municipio": "Município",
         "uf": "UF",
         "frequencia_MHz": "Frequência [MHz]",
+        "b_tx_Hz": "Banda TX [Hz]",
+        "b_rx_Hz": "Banda RX [Hz]",
+        "b_ov_Hz": "Banda sobreposta [Hz]",
         "az_to_sat_deg": "Azimute ao satélite [°]",
         "elev_deg": "Elevação [°]",
         "theta_eval_used_deg": "Ângulo no diagrama vertical [°]",
@@ -96,8 +106,12 @@ def formatar_resultados_para_exibicao(df_resultados: pd.DataFrame) -> pd.DataFra
         "g_t_dir_dBd": "Ganho TX na direção do satélite [dBd]",
         "erp_dir_kW": "ERP na direção do satélite [kW]",
         "eirp_dir_dBW": "EIRP na direção do satélite [dBW]",
+        "eirp_density_dBW_per_Hz": "Densidade de EIRP [dBW/Hz]",
+        "i_density_dBW_per_Hz": "Densidade interferente no satélite [dBW/Hz]",
         "i_dBW": "Potência interferente no satélite, I [dBW]",
+        "n0_dBW_per_Hz": "Densidade de ruído, N0 [dBW/Hz]",
         "n_dBW": "Ruído no receptor, N [dBW]",
+        "i_over_n0_dBHz": "I0/N0 [dB]",
         "i_over_n_dB": "I/N [dB]",
         "delta_t_over_t_pct": "ΔT/T [%]",
         "visible_flag": "Visível",
@@ -114,11 +128,16 @@ def formatar_resultados_para_exibicao(df_resultados: pd.DataFrame) -> pd.DataFra
         "Ganho TX na direção do satélite [dBd]",
         "ERP na direção do satélite [kW]",
         "EIRP na direção do satélite [dBW]",
+        "Densidade de EIRP [dBW/Hz]",
+        "Densidade interferente no satélite [dBW/Hz]",
         "Potência interferente no satélite, I [dBW]",
+        "Densidade de ruído, N0 [dBW/Hz]",
         "Ruído no receptor, N [dBW]",
+        "I0/N0 [dB]",
         "I/N [dB]",
         "ΔT/T [%]",
     ]
+    num_cols_int_like = ["Banda TX [Hz]", "Banda RX [Hz]", "Banda sobreposta [Hz]"]
 
     for c in num_cols_round_3:
         if c in df.columns:
@@ -127,6 +146,10 @@ def formatar_resultados_para_exibicao(df_resultados: pd.DataFrame) -> pd.DataFra
     for c in num_cols_round_2:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").round(2)
+
+    for c in num_cols_int_like:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce").round(0)
 
     if "Visível" in df.columns:
         df["Visível"] = format_bool_series(df["Visível"])
@@ -283,7 +306,7 @@ def montar_params_tx_ui():
         p["line_att_dB_per_100m"] = st.number_input("Atenuação da linha [dB/100m]", value=float(p["line_att_dB_per_100m"]), min_value=0.0)
         p["accessory_losses_dB"] = st.number_input("Perdas acessórias [dB]", value=float(p["accessory_losses_dB"]), min_value=0.0)
         p["pol_tx"] = st.selectbox("Polarização TX", options=["horizontal", "vertical", "eliptica", "circular"], index=0)
-        p["b_tx_Hz"] = st.number_input("Banda do interferente [Hz]", value=float(p["b_tx_Hz"]), min_value=1.0, step=1000000.0)
+        p["b_tx_Hz"] = st.number_input("Banda TX [Hz]", value=float(p["b_tx_Hz"]), min_value=1.0, step=1000000.0)
         p["Eh_dB"] = st.number_input("Discriminação horizontal adicional [dB]", value=float(p["Eh_dB"]))
     return p
 
@@ -296,12 +319,7 @@ def montar_params_rx_ui():
         p["gso_lon_deg"] = st.number_input("Longitude orbital GSO [graus]", value=float(p["gso_lon_deg"]))
         p["pol_rx"] = st.text_input("Polarização RX", value=str(p["pol_rx"]))
         p["t_sys_K"] = st.number_input("T_sys [K]", value=float(p["t_sys_K"]), min_value=1.0)
-        p["b_rx_Hz"] = st.number_input(
-            "Banda do receptor [Hz]",
-            value=float(p["b_rx_Hz"]),
-            min_value=1.0,
-            step=1000000.0,
-        )
+        p["b_rx_Hz"] = st.number_input("Banda RX [Hz]", value=float(p["b_rx_Hz"]), min_value=1.0, step=1000000.0)
         p["l_rx_dB"] = st.number_input("Perdas RX [dB]", value=float(p["l_rx_dB"]))
         p["g_r_max_dBi"] = st.number_input("Ganho máximo RX [dBi]", value=float(p["g_r_max_dBi"]))
         p["psi_b_deg"] = st.number_input("Semi-largura de feixe psi_b [graus]", value=float(p["psi_b_deg"]), min_value=1e-6)
@@ -770,7 +788,42 @@ with tab1:
                 st.error("O agregado excede o benchmark preliminar.")
 
         st.subheader("Resultados por estação")
-        st.dataframe(formatar_resultados_para_exibicao(df_resultados), use_container_width=True)
+
+        df_view = formatar_resultados_para_exibicao(df_resultados)
+
+        colunas_executivas = [
+            "Município",
+            "UF",
+            "Frequência [MHz]",
+            "Elevação [°]",
+            "Ganho TX na direção do satélite [dBd]",
+            "ERP na direção do satélite [kW]",
+            "Potência interferente no satélite, I [dBW]",
+            "Ruído no receptor, N [dBW]",
+            "I/N [dB]",
+            "Visível",
+            "Observação",
+        ]
+        colunas_executivas = [c for c in colunas_executivas if c in df_view.columns]
+
+        st.markdown("**Visão executiva**")
+        st.dataframe(df_view[colunas_executivas], use_container_width=True)
+
+        colunas_detalhadas = [
+            "Município",
+            "UF",
+            "Banda TX [Hz]",
+            "Banda RX [Hz]",
+            "Banda sobreposta [Hz]",
+            "Densidade de EIRP [dBW/Hz]",
+            "Densidade interferente no satélite [dBW/Hz]",
+            "Densidade de ruído, N0 [dBW/Hz]",
+            "I0/N0 [dB]",
+        ]
+        colunas_detalhadas = [c for c in colunas_detalhadas if c in df_view.columns]
+
+        with st.expander("Abrir grandezas espectrais e bandas", expanded=False):
+            st.dataframe(df_view[colunas_detalhadas], use_container_width=True)
 
         st.subheader("Resumo agregado por frequência")
         st.dataframe(formatar_agregado_freq_para_exibicao(df_agregado_freq), use_container_width=True)
@@ -880,7 +933,7 @@ with tab3:
 
     with col_tv:
         st.markdown("### Antena de TV")
-        st.caption("Acima: ganho em escala linear. Abaixo: ganho em dB, usando o diagrama vertical proxy adotado no modelo.")
+        st.caption("Acima: ganho em escala linear. Abaixo: ganho em dB, usando o diagrama vertical adotado no modelo.")
 
         fig_tv_lin = plot_diagrama_vertical_tv_linear(params_tx_ui, tx_pattern, df_resultados_pattern)
         st.pyplot(fig_tv_lin)
@@ -924,7 +977,9 @@ Nesta aba, você encontra:
 - calcula o ganho da antena de TV na direção do satélite;
 - calcula o ganho RX do satélite;
 - calcula a perda de espaço livre, com possibilidade de incluir uma perda adicional simplificada em baixa elevação;
-- calcula a potência interferente no satélite;
+- calcula a densidade espectral de potência interferente na entrada do receptor;
+- integra essa densidade na banda efetivamente sobreposta entre transmissor e receptor;
+- calcula o ruído térmico na banda do receptor;
 - calcula $I/N$ e $\Delta T/T$.
 
 **Agregação**
@@ -947,8 +1002,8 @@ Nesta aba, você encontra:
 - ganho RX do satélite obtido a partir de um modelo baseado na Recomendação ITU-R S.672-4;
 - polarização tratada por perda global de mismatch;
 - possibilidade de aplicar uma perda adicional em baixa elevação;
-- cálculo de ruído coerente com o cenário cocanal homogêneo;
-- interpretação de $I/N$ consistente com a simplificação de densidades de potência quando $b_{interferente} = b_{vitima}$.
+- cálculo da interferência a partir da densidade espectral de potência interferente integrada na banda efetivamente sobreposta;
+- cálculo de ruído na banda do receptor.
 """)
 
     st.markdown("### Limitações")
@@ -963,25 +1018,39 @@ Nesta aba, você encontra:
     st.markdown("### Observação sobre banda e cálculo de $I/N$")
 
     st.markdown("""
-No modelo atual, o ruído térmico é associado à **banda do receptor**. Na simplificação cocanal homogênea adotada, assume-se que essa banda é igual à banda do interferente.
+O modelo atual trata explicitamente:
 
-Além disso, a interpretação de $I/N$ pode ser feita de forma consistente em termos de **densidade de potência**, isto é:
+- a largura de banda do transmissor, $B_{tx}$;
+- a largura de banda do receptor, $B_{rx}$;
+- e a banda efetivamente sobreposta, $B_{ov}$.
 
-$$
-i = \\frac{I}{b_{interferente}}
-$$
+A potência interferente é obtida a partir da densidade espectral de potência interferente e da banda efetivamente sobreposta entre os dois sistemas.
 
-$$
-n = \\frac{N}{b_{vitima}}
-$$
-
-Quando se adota a simplificação:
+O ruído térmico é calculado na banda do receptor:
 
 $$
-b_{interferente} = b_{vitima}
+N = -228{,}6 + 10\\log_{10}(T_{sys}) + 10\\log_{10}(B_{rx})
 $$
 
-a análise de $I/N$ com potências totais permanece consistente com essa hipótese.
+A densidade de ruído é:
+
+$$
+N_0 = -228{,}6 + 10\\log_{10}(T_{sys})
+$$
+
+Em termos gerais, a relação entre interferência e ruído pode ser escrita como:
+
+$$
+\\frac{I}{N} = \\frac{I_0}{N_0} \\cdot \\frac{B_{ov}}{B_{rx}}
+$$
+
+Assim, quando:
+
+$$
+B_{tx} = B_{rx}
+$$
+
+o modelo se reduz naturalmente ao caso cocanal homogêneo mais simples.
 """)
 
     with st.expander("Abrir documentação completa (README.md)", expanded=False):
