@@ -114,7 +114,7 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
     line_att_dB_per_100m = float(estacao["line_att_dB_per_100m"])
     accessory_losses_dB = float(estacao["accessory_losses_dB"])
     pol_tx = estacao["pol_tx"]
-    b_tx_Hz = float(estacao["b_tx_Hz"])
+    b_rx_Hz = float(params_rx_sat["b_rx_Hz"])
     eh_dB = float(estacao["Eh_dB"])
 
     sat_id = params_rx_sat["sat_id"]
@@ -200,7 +200,7 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
     erp_dir_kW = dBW_to_W(erp_dir_dBW) / 1000.0
 
     # No modelo atual, N = kTB é calculado na mesma banda do interferente (cenário cocanal homogêneo).
-    n_dBW = -228.6 + 10.0 * np.log10(t_sys_K) + 10.0 * np.log10(b_tx_Hz)
+    n_dBW = -228.6 + 10.0 * np.log10(t_sys_K) + 10.0 * np.log10(b_rx_Hz)
 
     if visible_flag:
         l_fs_dB = 32.45 + 20.0 * np.log10(f_tx_center_MHz) + 20.0 * np.log10(d_station_sat_km)

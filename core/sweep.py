@@ -37,7 +37,7 @@ def calcular_i_agg_total_e_in(estacoes_expandidas: list[dict], params_rx_sat_bas
         line_length_m = float(estacao["line_length_m"])
         line_att_dB_per_100m = float(estacao["line_att_dB_per_100m"])
         accessory_losses_dB = float(estacao["accessory_losses_dB"])
-        b_tx_Hz = float(estacao["b_tx_Hz"])
+        b_rx_Hz = float(params_rx_sat_base["b_rx_Hz"])
         eh_dB = float(estacao["Eh_dB"])
 
         h_station_m = site_alt_m + ant_height_m
@@ -91,7 +91,7 @@ def calcular_i_agg_total_e_in(estacoes_expandidas: list[dict], params_rx_sat_bas
         n_estacoes_visiveis += 1
 
         if pd.isna(n_dBW_ref):
-            n_dBW_ref = -228.6 + 10.0 * np.log10(t_sys_K) + 10.0 * np.log10(b_tx_Hz)
+            n_dBW_ref = -228.6 + 10.0 * np.log10(t_sys_K) + 10.0 * np.log10(b_rx_Hz)
 
     if n_estacoes_visiveis == 0:
         return {"n_estacoes_visiveis": 0, "i_agg_total_dBW": -np.inf, "i_over_n_agg_total_dB": np.nan}

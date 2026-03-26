@@ -21,6 +21,7 @@ params_rx_sat = {
     "gso_lon_deg": -30.0,
     "pol_rx": "M",
     "t_sys_K": 700.0,
+    "b_rx_Hz": 6_000_000.0,
     "l_rx_dB": 0.0,
     "g_r_max_dBi": 23.0,
     "psi_b_deg": 1.1,

@@ -44,6 +44,16 @@ def carregar_estacoes_padrao_df() -> pd.DataFrame:
     return pd.DataFrame(estacoes_exemplo)
 
 
+def carregar_readme_text() -> str:
+    readme_path = Path(__file__).resolve().parent / "README.md"
+    if readme_path.exists():
+        try:
+            return readme_path.read_text(encoding="utf-8")
+        except Exception:
+            return "Não foi possível ler o arquivo README.md."
+    return "README.md não encontrado."
+
+
 def format_bool_series(series: pd.Series) -> pd.Series:
     return series.map(lambda x: "Sim" if bool(x) else "Não")
 
@@ -286,6 +296,12 @@ def montar_params_rx_ui():
         p["gso_lon_deg"] = st.number_input("Longitude orbital GSO [graus]", value=float(p["gso_lon_deg"]))
         p["pol_rx"] = st.text_input("Polarização RX", value=str(p["pol_rx"]))
         p["t_sys_K"] = st.number_input("T_sys [K]", value=float(p["t_sys_K"]), min_value=1.0)
+        p["b_rx_Hz"] = st.number_input(
+            "Banda do receptor [Hz]",
+            value=float(p["b_rx_Hz"]),
+            min_value=1.0,
+            step=1000000.0,
+        )
         p["l_rx_dB"] = st.number_input("Perdas RX [dB]", value=float(p["l_rx_dB"]))
         p["g_r_max_dBi"] = st.number_input("Ganho máximo RX [dBi]", value=float(p["g_r_max_dBi"]))
         p["psi_b_deg"] = st.number_input("Semi-largura de feixe psi_b [graus]", value=float(p["psi_b_deg"]), min_value=1e-6)
@@ -685,7 +701,12 @@ with col_right:
     st.metric("ERP máxima [kW]", f"{metricas_modelo['erp_max_kW']:.2f}")
     st.caption("Calculada a partir da potência, perdas de linha e ganho máximo da antena.")
 
-tab1, tab2, tab3 = st.tabs(["Cenário único", "Varredura de longitude GSO", "Diagramas das antenas"])
+tab1, tab2, tab3, tab4 = st.tabs([
+    "Cenário único",
+    "Varredura de longitude GSO",
+    "Diagramas das antenas",
+    "Metodologia e ajuda",
+])
 
 with tab1:
     st.caption(
@@ -881,3 +902,87 @@ with tab3:
         "Se a simulação do cenário único já tiver sido rodada, os diagramas mostram também os pontos "
         "correspondentes às estações visíveis sobre as curvas."
     )
+
+with tab4:
+    st.subheader("Metodologia e ajuda")
+
+    st.markdown("""
+Este aplicativo realiza uma **estimativa da interferência agregada** de estações de TV digital em satélites geoestacionários, no sentido **Terra → espaço**.
+
+Nesta aba, você encontra:
+- um resumo da metodologia;
+- as principais hipóteses adotadas;
+- as limitações do modelo;
+- e o conteúdo completo do `README.md`.
+""")
+
+    st.markdown("### Resumo rápido")
+
+    st.markdown("""
+**Cálculo por estação**
+- calcula a geometria estação–satélite;
+- calcula o ganho da antena de TV na direção do satélite;
+- calcula o ganho RX do satélite;
+- calcula a perda de espaço livre, com possibilidade de incluir uma perda adicional simplificada em baixa elevação;
+- calcula a potência interferente no satélite;
+- calcula $I/N$ e $\Delta T/T$.
+
+**Agregação**
+- soma as contribuições das estações visíveis em unidade linear;
+- converte o agregado para dBW;
+- compara o resultado com o critério de proteção adotado.
+
+**Varredura de longitude GSO**
+- repete o cálculo para diferentes longitudes orbitais;
+- permite identificar faixas de longitude que atendem ao critério de proteção.
+""")
+
+    st.markdown("### Hipóteses principais")
+
+    st.markdown("""
+- satélite GSO ideal;
+- análise estática;
+- foco em interferência agregada cocanal;
+- ganho da antena de TV estimado a partir de um diagrama vertical baseado na Recomendação ITU-R BT.1195-1;
+- ganho RX do satélite obtido a partir de um modelo baseado na Recomendação ITU-R S.672-4;
+- polarização tratada por perda global de mismatch;
+- possibilidade de aplicar uma perda adicional em baixa elevação;
+- cálculo de ruído coerente com o cenário cocanal homogêneo;
+- interpretação de $I/N$ consistente com a simplificação de densidades de potência quando $b_{interferente} = b_{vitima}$.
+""")
+
+    st.markdown("### Limitações")
+
+    st.markdown("""
+- não há modelagem explícita separada de polarização H/V;
+- o diagrama horizontal detalhado da antena de TV não é tratado explicitamente;
+- o agregado total só é estritamente cocanal se todas as estações estiverem na mesma frequência;
+- trata-se de uma ferramenta de estudo preliminar, não de uma análise regulatória definitiva.
+""")
+
+    st.markdown("### Observação sobre banda e cálculo de $I/N$")
+
+    st.markdown("""
+No modelo atual, o ruído térmico é associado à **banda do receptor**. Na simplificação cocanal homogênea adotada, assume-se que essa banda é igual à banda do interferente.
+
+Além disso, a interpretação de $I/N$ pode ser feita de forma consistente em termos de **densidade de potência**, isto é:
+
+$$
+i = \\frac{I}{b_{interferente}}
+$$
+
+$$
+n = \\frac{N}{b_{vitima}}
+$$
+
+Quando se adota a simplificação:
+
+$$
+b_{interferente} = b_{vitima}
+$$
+
+a análise de $I/N$ com potências totais permanece consistente com essa hipótese.
+""")
+
+    with st.expander("Abrir documentação completa (README.md)", expanded=False):
+        st.markdown(carregar_readme_text())
