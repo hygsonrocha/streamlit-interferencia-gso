@@ -115,6 +115,7 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
     accessory_losses_dB = float(estacao["accessory_losses_dB"])
     pol_tx = estacao["pol_tx"]
     b_rx_Hz = float(params_rx_sat["b_rx_Hz"])
+    b_tx_Hz = float(estacao["b_tx_Hz"])
     eh_dB = float(estacao["Eh_dB"])
 
     sat_id = params_rx_sat["sat_id"]

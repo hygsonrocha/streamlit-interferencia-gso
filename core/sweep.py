@@ -5,17 +5,26 @@ from .antenna import ganho_antena_gso_s672, low_elevation_excess_loss_dB
 from .budget import W_to_dBW
 
 
-def calcular_i_agg_total_e_in(estacoes_expandidas: list[dict], params_rx_sat_base: dict, tx_pattern: dict, gso_lon_deg: float, g_r_max_dBi: float) -> dict:
+def calcular_i_agg_total_e_in(
+    estacoes_expandidas: list[dict],
+    params_rx_sat_base: dict,
+    tx_pattern: dict,
+    gso_lon_deg: float,
+    g_r_max_dBi: float,
+) -> dict:
     angle_deg = np.asarray(tx_pattern["angle_deg"], dtype=float)
     e_rel = np.asarray(tx_pattern["e_rel"], dtype=float)
 
     t_sys_K = float(params_rx_sat_base["t_sys_K"])
+    b_rx_Hz = float(params_rx_sat_base["b_rx_Hz"])
     l_rx_dB = float(params_rx_sat_base["l_rx_dB"])
     psi_b_deg = float(params_rx_sat_base["psi_b_deg"])
     ln_db = float(params_rx_sat_base["ln_db"])
     lf_db = float(params_rx_sat_base["lf_db"])
     elev_min_deg = float(params_rx_sat_base.get("elev_min_deg", 0.0))
-    apply_low_elevation_excess_loss = bool(params_rx_sat_base.get("apply_low_elevation_excess_loss", True))
+    apply_low_elevation_excess_loss = bool(
+        params_rx_sat_base.get("apply_low_elevation_excess_loss", True)
+    )
 
     i_total_W = 0.0
     n_dBW_ref = np.nan
@@ -37,7 +46,6 @@ def calcular_i_agg_total_e_in(estacoes_expandidas: list[dict], params_rx_sat_bas
         line_length_m = float(estacao["line_length_m"])
         line_att_dB_per_100m = float(estacao["line_att_dB_per_100m"])
         accessory_losses_dB = float(estacao["accessory_losses_dB"])
-        b_rx_Hz = float(params_rx_sat_base["b_rx_Hz"])
         eh_dB = float(estacao["Eh_dB"])
 
         h_station_m = site_alt_m + ant_height_m
@@ -66,24 +74,36 @@ def calcular_i_agg_total_e_in(estacoes_expandidas: list[dict], params_rx_sat_bas
 
         tx_vertical_offaxis_deg = elev_deg - tilt_deg
         theta_eval_abs_deg = abs(tx_vertical_offaxis_deg)
-        theta_eval_used_deg = float(np.clip(theta_eval_abs_deg, float(np.min(angle_deg)), float(np.max(angle_deg))))
+        theta_eval_used_deg = float(
+            np.clip(
+                theta_eval_abs_deg,
+                float(np.min(angle_deg)),
+                float(np.max(angle_deg)),
+            )
+        )
 
         ev_rel = float(np.interp(theta_eval_used_deg, angle_deg, e_rel))
         ev_rel = max(ev_rel, 1e-12)
         ev_dB = 20.0 * np.log10(ev_rel)
-        gt_dir_dBi = g_t_max_dBi + eh_dB + ev_dB
+        g_t_dir_dBi = g_t_max_dBi + eh_dB + ev_dB
 
         u_sat_to_station_ecef = unit_vector(r_station_ecef - r_sat_ecef)
         u_sat_boresight_ecef = unit_vector(-r_sat_ecef)
         psi_rx_deg = angle_between_vectors_deg(u_sat_boresight_ecef, u_sat_to_station_ecef)
 
-        g_r_dir_dBi = ganho_antena_gso_s672(psi_deg=psi_rx_deg, gmax_dbi=g_r_max_dBi, psi_b_deg=psi_b_deg, ln_db=ln_db, lf_db=lf_db)
+        g_r_dir_dBi = ganho_antena_gso_s672(
+            psi_deg=psi_rx_deg,
+            gmax_dbi=g_r_max_dBi,
+            psi_b_deg=psi_b_deg,
+            ln_db=ln_db,
+            lf_db=lf_db,
+        )
 
         l_fs_dB = 32.45 + 20.0 * np.log10(f_tx_center_MHz) + 20.0 * np.log10(d_station_sat_km)
         l_path_dB = l_fs_dB + l_atm_dB + l_low_elev_excess_dB
 
         p_ant_dBW = p_tx_dBW - l_tx_dB
-        eirp_dir_dBW = p_ant_dBW + gt_dir_dBi
+        eirp_dir_dBW = p_ant_dBW + g_t_dir_dBi
 
         i_dBW = eirp_dir_dBW - l_path_dB + g_r_dir_dBi - l_pol_mismatch_dB - l_rx_dB
 
@@ -94,11 +114,20 @@ def calcular_i_agg_total_e_in(estacoes_expandidas: list[dict], params_rx_sat_bas
             n_dBW_ref = -228.6 + 10.0 * np.log10(t_sys_K) + 10.0 * np.log10(b_rx_Hz)
 
     if n_estacoes_visiveis == 0:
-        return {"n_estacoes_visiveis": 0, "i_agg_total_dBW": -np.inf, "i_over_n_agg_total_dB": np.nan}
+        return {
+            "n_estacoes_visiveis": 0,
+            "i_agg_total_dBW": -np.inf,
+            "i_over_n_agg_total_dB": np.nan,
+        }
 
     i_agg_total_dBW = W_to_dBW(i_total_W)
     i_over_n_agg_total_dB = i_agg_total_dBW - n_dBW_ref
-    return {"n_estacoes_visiveis": n_estacoes_visiveis, "i_agg_total_dBW": i_agg_total_dBW, "i_over_n_agg_total_dB": i_over_n_agg_total_dB}
+
+    return {
+        "n_estacoes_visiveis": n_estacoes_visiveis,
+        "i_agg_total_dBW": i_agg_total_dBW,
+        "i_over_n_agg_total_dB": i_over_n_agg_total_dB,
+    }
 
 
 def build_longitude_grid(lon_min_deg: float, lon_max_deg: float, lon_step_deg: float) -> np.ndarray:
@@ -113,26 +142,32 @@ def build_longitude_grid(lon_min_deg: float, lon_max_deg: float, lon_step_deg: f
 
 def extrair_faixas_contiguas(df: pd.DataFrame, lon_step_deg: float) -> pd.DataFrame:
     linhas = []
+
     for g_r, grupo in df.groupby("g_r_max_dBi", sort=True):
         grupo = grupo.sort_values("gso_lon_deg").reset_index(drop=True)
         grupo_ok = grupo[grupo["atende_criterio"]].copy().reset_index(drop=True)
+
         if grupo_ok.empty:
-            linhas.append({
-                "g_r_max_dBi": float(g_r),
-                "lon_ini_deg": np.nan,
-                "lon_fim_deg": np.nan,
-                "n_pontos": 0,
-                "largura_deg_amostrada": np.nan,
-                "i_over_n_min_dB_na_faixa": np.nan,
-                "i_over_n_max_dB_na_faixa": np.nan,
-                "benchmark_i_over_n_dB": float(grupo["benchmark_i_over_n_dB"].iloc[0]),
-                "lon_step_deg": float(lon_step_deg),
-                "observacao": "Nenhuma longitude atendeu ao critério.",
-            })
+            linhas.append(
+                {
+                    "g_r_max_dBi": float(g_r),
+                    "lon_ini_deg": np.nan,
+                    "lon_fim_deg": np.nan,
+                    "n_pontos": 0,
+                    "largura_deg_amostrada": np.nan,
+                    "i_over_n_min_dB_na_faixa": np.nan,
+                    "i_over_n_max_dB_na_faixa": np.nan,
+                    "benchmark_i_over_n_dB": float(grupo["benchmark_i_over_n_dB"].iloc[0]),
+                    "lon_step_deg": float(lon_step_deg),
+                    "observacao": "Nenhuma longitude atendeu ao critério.",
+                }
+            )
             continue
+
         idx_ini = 0
         for i in range(1, len(grupo_ok) + 1):
             fim_bloco = False
+
             if i == len(grupo_ok):
                 fim_bloco = True
             else:
@@ -140,21 +175,26 @@ def extrair_faixas_contiguas(df: pd.DataFrame, lon_step_deg: float) -> pd.DataFr
                 lon_prox = float(grupo_ok.loc[i, "gso_lon_deg"])
                 if not np.isclose(lon_prox - lon_atual, lon_step_deg, atol=1e-9):
                     fim_bloco = True
+
             if fim_bloco:
                 bloco = grupo_ok.iloc[idx_ini:i].copy()
                 lon_ini = float(bloco["gso_lon_deg"].iloc[0])
                 lon_fim = float(bloco["gso_lon_deg"].iloc[-1])
-                linhas.append({
-                    "g_r_max_dBi": float(g_r),
-                    "lon_ini_deg": lon_ini,
-                    "lon_fim_deg": lon_fim,
-                    "n_pontos": int(len(bloco)),
-                    "largura_deg_amostrada": float(lon_fim - lon_ini),
-                    "i_over_n_min_dB_na_faixa": float(bloco["i_over_n_agg_total_dB"].min()),
-                    "i_over_n_max_dB_na_faixa": float(bloco["i_over_n_agg_total_dB"].max()),
-                    "benchmark_i_over_n_dB": float(bloco["benchmark_i_over_n_dB"].iloc[0]),
-                    "lon_step_deg": float(lon_step_deg),
-                    "observacao": "Faixa contígua amostrada que atende ao critério.",
-                })
+
+                linhas.append(
+                    {
+                        "g_r_max_dBi": float(g_r),
+                        "lon_ini_deg": lon_ini,
+                        "lon_fim_deg": lon_fim,
+                        "n_pontos": int(len(bloco)),
+                        "largura_deg_amostrada": float(lon_fim - lon_ini),
+                        "i_over_n_min_dB_na_faixa": float(bloco["i_over_n_agg_total_dB"].min()),
+                        "i_over_n_max_dB_na_faixa": float(bloco["i_over_n_agg_total_dB"].max()),
+                        "benchmark_i_over_n_dB": float(bloco["benchmark_i_over_n_dB"].iloc[0]),
+                        "lon_step_deg": float(lon_step_deg),
+                        "observacao": "Faixa contígua amostrada que atende ao critério.",
+                    }
+                )
                 idx_ini = i
+
     return pd.DataFrame(linhas)
