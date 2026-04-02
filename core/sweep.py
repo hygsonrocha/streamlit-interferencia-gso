@@ -2,7 +2,10 @@ import numpy as np
 import pandas as pd
 from .geometry import geodetic_to_ecef, gso_to_ecef, ecef_to_enu_matrix, unit_vector, angle_between_vectors_deg
 from .antenna import ganho_antena_gso_s672, low_elevation_excess_loss_dB
-from .budget import W_to_dBW
+from .budget import W_to_dBW, calcular_banda_sobreposta_hz
+
+
+DBD_TO_DBI = 2.15
 
 
 def calcular_i_agg_total_e_in(
@@ -17,6 +20,7 @@ def calcular_i_agg_total_e_in(
 
     t_sys_K = float(params_rx_sat_base["t_sys_K"])
     b_rx_Hz = float(params_rx_sat_base["b_rx_Hz"])
+    f_rx_center_MHz = float(params_rx_sat_base.get("f_rx_center_MHz", 300.0))
     l_rx_dB = float(params_rx_sat_base["l_rx_dB"])
     psi_b_deg = float(params_rx_sat_base["psi_b_deg"])
     ln_db = float(params_rx_sat_base["ln_db"])
@@ -26,8 +30,11 @@ def calcular_i_agg_total_e_in(
         params_rx_sat_base.get("apply_low_elevation_excess_loss", True)
     )
 
+    if elev_min_deg < 0.0:
+        raise ValueError("elev_min_deg não pode ser negativo. Use 0° ou maior.")
+
     i_total_W = 0.0
-    n_dBW_ref = np.nan
+    n_dBW_ref = -228.6 + 10.0 * np.log10(t_sys_K) + 10.0 * np.log10(b_rx_Hz)
     n_estacoes_visiveis = 0
 
     r_sat_ecef = gso_to_ecef(gso_lon_deg)
@@ -46,12 +53,12 @@ def calcular_i_agg_total_e_in(
         line_length_m = float(estacao["line_length_m"])
         line_att_dB_per_100m = float(estacao["line_att_dB_per_100m"])
         accessory_losses_dB = float(estacao["accessory_losses_dB"])
-        eh_dB = float(estacao["Eh_dB"])
+        b_tx_Hz = float(estacao["b_tx_Hz"])
+        horizontal_discrimination_loss_dB = float(estacao["Eh_dB"])
 
         h_station_m = site_alt_m + ant_height_m
         l_tx_dB = line_att_dB_per_100m * (line_length_m / 100.0) + accessory_losses_dB
         p_tx_dBW = 10.0 * np.log10(p_tx_kW * 1000.0)
-        g_t_max_dBi = g_t_max_dBd + 2.15
 
         r_station_ecef = geodetic_to_ecef(lat_deg, lon_deg, h_station_m)
         los_ecef = r_sat_ecef - r_station_ecef
@@ -62,7 +69,9 @@ def calcular_i_agg_total_e_in(
         east, north, up = los_enu
 
         elev_deg = np.rad2deg(np.arctan2(up, np.hypot(east, north)))
-        if elev_deg < elev_min_deg:
+        visible_geom_flag = bool(elev_deg > 0.0)
+        visible_flag = bool(visible_geom_flag and (elev_deg >= elev_min_deg))
+        if not visible_flag:
             continue
 
         if apply_low_elevation_excess_loss:
@@ -72,7 +81,10 @@ def calcular_i_agg_total_e_in(
         else:
             l_low_elev_excess_dB = 0.0
 
-        tx_vertical_offaxis_deg = elev_deg - tilt_deg
+        n_estacoes_visiveis += 1
+
+        # Convenção adotada neste arquivo: tilt_deg é downtilt positivo.
+        tx_vertical_offaxis_deg = elev_deg + tilt_deg
         theta_eval_abs_deg = abs(tx_vertical_offaxis_deg)
         theta_eval_used_deg = float(
             np.clip(
@@ -85,7 +97,8 @@ def calcular_i_agg_total_e_in(
         ev_rel = float(np.interp(theta_eval_used_deg, angle_deg, e_rel))
         ev_rel = max(ev_rel, 1e-12)
         ev_dB = 20.0 * np.log10(ev_rel)
-        g_t_dir_dBi = g_t_max_dBi + eh_dB + ev_dB
+        g_t_dir_dBd = g_t_max_dBd - horizontal_discrimination_loss_dB + ev_dB
+        g_t_dir_dBi = g_t_dir_dBd + DBD_TO_DBI
 
         u_sat_to_station_ecef = unit_vector(r_station_ecef - r_sat_ecef)
         u_sat_boresight_ecef = unit_vector(-r_sat_ecef)
@@ -105,13 +118,28 @@ def calcular_i_agg_total_e_in(
         p_ant_dBW = p_tx_dBW - l_tx_dB
         eirp_dir_dBW = p_ant_dBW + g_t_dir_dBi
 
-        i_dBW = eirp_dir_dBW - l_path_dB + g_r_dir_dBi - l_pol_mismatch_dB - l_rx_dB
+        b_ov_Hz = calcular_banda_sobreposta_hz(
+            f_tx_center_MHz=f_tx_center_MHz,
+            b_tx_Hz=b_tx_Hz,
+            f_rx_center_MHz=f_rx_center_MHz,
+            b_rx_Hz=b_rx_Hz,
+        )
+        if b_ov_Hz <= 0.0:
+            continue
+
+        eirp_density_dBW_per_Hz = eirp_dir_dBW - 10.0 * np.log10(b_tx_Hz)
+
+        i_density_dBW_per_Hz = (
+            eirp_density_dBW_per_Hz
+            - l_path_dB
+            + g_r_dir_dBi
+            - l_pol_mismatch_dB
+            - l_rx_dB
+        )
+
+        i_dBW = i_density_dBW_per_Hz + 10.0 * np.log10(b_ov_Hz)
 
         i_total_W += 10.0 ** (i_dBW / 10.0)
-        n_estacoes_visiveis += 1
-
-        if pd.isna(n_dBW_ref):
-            n_dBW_ref = -228.6 + 10.0 * np.log10(t_sys_K) + 10.0 * np.log10(b_rx_Hz)
 
     if n_estacoes_visiveis == 0:
         return {
@@ -130,6 +158,7 @@ def calcular_i_agg_total_e_in(
     }
 
 
+
 def build_longitude_grid(lon_min_deg: float, lon_max_deg: float, lon_step_deg: float) -> np.ndarray:
     if lon_step_deg <= 0:
         raise ValueError("lon_step_deg deve ser positivo.")
@@ -138,6 +167,7 @@ def build_longitude_grid(lon_min_deg: float, lon_max_deg: float, lon_step_deg: f
 
     grid = np.arange(lon_min_deg, lon_max_deg + 0.5 * lon_step_deg, lon_step_deg, dtype=float)
     return np.round(grid, 10)
+
 
 
 def extrair_faixas_contiguas(df: pd.DataFrame, lon_step_deg: float) -> pd.DataFrame:

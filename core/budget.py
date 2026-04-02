@@ -3,8 +3,12 @@ from .geometry import geodetic_to_ecef, gso_to_ecef, ecef_to_enu_matrix, unit_ve
 from .antenna import ganho_antena_gso_s672, low_elevation_excess_loss_dB
 
 
+DBD_TO_DBI = 2.15
+
+
 def dBW_to_W(p_dbw: float) -> float:
     return 10.0 ** (p_dbw / 10.0)
+
 
 
 def W_to_dBW(p_w: float) -> float:
@@ -13,8 +17,10 @@ def W_to_dBW(p_w: float) -> float:
     return 10.0 * np.log10(p_w)
 
 
+
 def expandir_estacoes_com_defaults(estacoes: list[dict], params_tx_default: dict) -> list[dict]:
     return [{**params_tx_default, **estacao} for estacao in estacoes]
+
 
 
 def validar_estacoes(estacoes: list[dict]) -> None:
@@ -51,6 +57,7 @@ def validar_estacoes(estacoes: list[dict]) -> None:
             raise ValueError(f"Estação #{i} com frequência não positiva.")
 
 
+
 def validar_tx_pattern(tx_pattern: dict) -> None:
     if "angle_deg" not in tx_pattern or "e_rel" not in tx_pattern:
         raise ValueError("tx_pattern deve conter 'angle_deg' e 'e_rel'.")
@@ -68,16 +75,16 @@ def validar_tx_pattern(tx_pattern: dict) -> None:
         raise ValueError("'e_rel' deve conter apenas valores positivos.")
 
 
+
 def calcular_metricas_estacao_modelo(params_tx: dict) -> dict:
-    """
-    Calcula métricas da estação modelo a partir dos parâmetros da sidebar.
-    Centraliza o cálculo da ERP máxima para evitar duplicação no app.
-    """
     p_tx_kW = float(params_tx["p_tx_kW"])
     g_t_max_dBd = float(params_tx["g_t_max_dBd"])
     line_length_m = float(params_tx["line_length_m"])
     line_att_dB_per_100m = float(params_tx["line_att_dB_per_100m"])
     accessory_losses_dB = float(params_tx["accessory_losses_dB"])
+
+    if p_tx_kW <= 0.0:
+        raise ValueError("p_tx_kW deve ser positivo.")
 
     l_tx_dB = line_att_dB_per_100m * (line_length_m / 100.0) + accessory_losses_dB
     p_tx_dBW = 10.0 * np.log10(p_tx_kW * 1000.0)
@@ -93,6 +100,29 @@ def calcular_metricas_estacao_modelo(params_tx: dict) -> dict:
         "erp_max_dBW": erp_max_dBW,
         "erp_max_kW": erp_max_kW,
     }
+
+
+
+def calcular_banda_sobreposta_hz(
+    f_tx_center_MHz: float,
+    b_tx_Hz: float,
+    f_rx_center_MHz: float,
+    b_rx_Hz: float,
+) -> float:
+    if b_tx_Hz <= 0.0 or b_rx_Hz <= 0.0:
+        raise ValueError("b_tx_Hz e b_rx_Hz devem ser positivos.")
+
+    tx_half_bw_MHz = (b_tx_Hz / 1e6) / 2.0
+    rx_half_bw_MHz = (b_rx_Hz / 1e6) / 2.0
+
+    tx_f_min_MHz = f_tx_center_MHz - tx_half_bw_MHz
+    tx_f_max_MHz = f_tx_center_MHz + tx_half_bw_MHz
+    rx_f_min_MHz = f_rx_center_MHz - rx_half_bw_MHz
+    rx_f_max_MHz = f_rx_center_MHz + rx_half_bw_MHz
+
+    overlap_MHz = min(tx_f_max_MHz, rx_f_max_MHz) - max(tx_f_min_MHz, rx_f_min_MHz)
+    return max(0.0, overlap_MHz * 1e6)
+
 
 
 def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_pattern: dict) -> dict:
@@ -114,14 +144,15 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
     line_att_dB_per_100m = float(estacao["line_att_dB_per_100m"])
     accessory_losses_dB = float(estacao["accessory_losses_dB"])
     pol_tx = estacao["pol_tx"]
-    b_rx_Hz = float(params_rx_sat["b_rx_Hz"])
     b_tx_Hz = float(estacao["b_tx_Hz"])
-    eh_dB = float(estacao["Eh_dB"])
+    horizontal_discrimination_loss_dB = float(estacao["Eh_dB"])
 
     sat_id = params_rx_sat["sat_id"]
     gso_lon_deg = float(params_rx_sat["gso_lon_deg"])
     pol_rx = params_rx_sat["pol_rx"]
     t_sys_K = float(params_rx_sat["t_sys_K"])
+    b_rx_Hz = float(params_rx_sat["b_rx_Hz"])
+    f_rx_center_MHz = float(params_rx_sat.get("f_rx_center_MHz", f_tx_center_MHz))
     l_rx_dB = float(params_rx_sat["l_rx_dB"])
     g_r_max_dBi = float(params_rx_sat["g_r_max_dBi"])
     psi_b_deg = float(params_rx_sat["psi_b_deg"])
@@ -131,6 +162,17 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
     elev_min_deg = float(params_rx_sat.get("elev_min_deg", 0.0))
     apply_low_elevation_excess_loss = bool(params_rx_sat.get("apply_low_elevation_excess_loss", True))
 
+    if p_tx_kW <= 0.0:
+        raise ValueError("p_tx_kW deve ser positivo.")
+    if b_tx_Hz <= 0.0:
+        raise ValueError("b_tx_Hz deve ser positivo.")
+    if b_rx_Hz <= 0.0:
+        raise ValueError("b_rx_Hz deve ser positivo.")
+    if t_sys_K <= 0.0:
+        raise ValueError("t_sys_K deve ser positivo.")
+    if elev_min_deg < 0.0:
+        raise ValueError("elev_min_deg não pode ser negativo. Use 0° ou maior.")
+
     angle_deg = np.asarray(tx_pattern["angle_deg"], dtype=float)
     e_rel = np.asarray(tx_pattern["e_rel"], dtype=float)
 
@@ -138,8 +180,6 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
 
     l_tx_dB = line_att_dB_per_100m * (line_length_m / 100.0) + accessory_losses_dB
     p_tx_dBW = 10.0 * np.log10(p_tx_kW * 1000.0)
-    g_t_max_dBi = g_t_max_dBd + 2.15
-
     p_ant_dBW = p_tx_dBW - l_tx_dB
 
     erp_max_dBW = p_ant_dBW + g_t_max_dBd
@@ -147,11 +187,16 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
 
     tx_f_min_MHz = f_tx_center_MHz - (b_tx_Hz / 1e6) / 2.0
     tx_f_max_MHz = f_tx_center_MHz + (b_tx_Hz / 1e6) / 2.0
+    rx_f_min_MHz = f_rx_center_MHz - (b_rx_Hz / 1e6) / 2.0
+    rx_f_max_MHz = f_rx_center_MHz + (b_rx_Hz / 1e6) / 2.0
 
     r_station_ecef = geodetic_to_ecef(lat_deg, lon_deg, h_station_m)
     r_sat_ecef = gso_to_ecef(gso_lon_deg)
     los_ecef = r_sat_ecef - r_station_ecef
     d_station_sat_km = np.linalg.norm(los_ecef) / 1000.0
+
+    if d_station_sat_km <= 0.0:
+        raise ValueError("A distância estação-satélite deve ser positiva.")
 
     R_ecef2enu = ecef_to_enu_matrix(lat_deg, lon_deg)
     los_enu = R_ecef2enu @ los_ecef
@@ -160,15 +205,15 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
     az_to_sat_deg = (np.rad2deg(np.arctan2(east, north)) + 360.0) % 360.0
     elev_deg = np.rad2deg(np.arctan2(up, np.hypot(east, north)))
 
-    tx_vertical_offaxis_deg = elev_deg - tilt_deg
+    # Convenção adotada neste arquivo: tilt_deg é downtilt positivo.
+    tx_vertical_offaxis_deg = elev_deg + tilt_deg
 
     u_sat_to_station_ecef = unit_vector(r_station_ecef - r_sat_ecef)
     u_sat_boresight_ecef = unit_vector(-r_sat_ecef)
-
     gso_rx_boresight_offaxis_deg = angle_between_vectors_deg(u_sat_boresight_ecef, u_sat_to_station_ecef)
 
     visible_geom_flag = bool(elev_deg > 0.0)
-    visible_flag = bool(elev_deg >= elev_min_deg)
+    visible_flag = bool(visible_geom_flag and (elev_deg >= elev_min_deg))
 
     theta_eval_deg = tx_vertical_offaxis_deg
     theta_eval_abs_deg = abs(theta_eval_deg)
@@ -177,15 +222,16 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
     theta_pattern_max_deg = float(np.max(angle_deg))
 
     pattern_clipped_flag = bool((theta_eval_abs_deg < theta_pattern_min_deg) or (theta_eval_abs_deg > theta_pattern_max_deg))
-
     theta_eval_used_deg = float(np.clip(theta_eval_abs_deg, theta_pattern_min_deg, theta_pattern_max_deg))
 
     ev_rel = float(np.interp(theta_eval_used_deg, angle_deg, e_rel))
     ev_rel = max(ev_rel, 1e-12)
     ev_dB = 20.0 * np.log10(ev_rel)
 
-    g_t_dir_dBi = g_t_max_dBi + eh_dB + ev_dB
-    g_t_dir_dBd = g_t_dir_dBi - 2.15
+    # O ganho direcional é formado em dBd e então convertido para dBi.
+    g_t_dir_dBd = g_t_max_dBd - horizontal_discrimination_loss_dB + ev_dB
+    g_t_dir_dBi = g_t_dir_dBd + DBD_TO_DBI
+    g_t_max_dBi = g_t_max_dBd + DBD_TO_DBI
 
     g_r_dir_dBi = ganho_antena_gso_s672(
         psi_deg=gso_rx_boresight_offaxis_deg,
@@ -200,8 +246,16 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
     erp_dir_dBW = p_ant_dBW + g_t_dir_dBd
     erp_dir_kW = dBW_to_W(erp_dir_dBW) / 1000.0
 
-    # No modelo atual, N = kTB é calculado na mesma banda do interferente (cenário cocanal homogêneo).
-    n_dBW = -228.6 + 10.0 * np.log10(t_sys_K) + 10.0 * np.log10(b_rx_Hz)
+    b_ov_Hz = calcular_banda_sobreposta_hz(
+        f_tx_center_MHz=f_tx_center_MHz,
+        b_tx_Hz=b_tx_Hz,
+        f_rx_center_MHz=f_rx_center_MHz,
+        b_rx_Hz=b_rx_Hz,
+    )
+    spectral_overlap_flag = bool(b_ov_Hz > 0.0)
+
+    n0_dBW_per_Hz = -228.6 + 10.0 * np.log10(t_sys_K)
+    n_dBW = n0_dBW_per_Hz + 10.0 * np.log10(b_rx_Hz)
 
     if visible_flag:
         l_fs_dB = 32.45 + 20.0 * np.log10(f_tx_center_MHz) + 20.0 * np.log10(d_station_sat_km)
@@ -213,28 +267,54 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
 
         if np.isinf(l_low_elev_excess_dB):
             l_path_dB = np.nan
+            eirp_density_dBW_per_Hz = np.nan
+            i_density_dBW_per_Hz = np.nan
             i_dBW = np.nan
             i_W = 0.0
             i_over_n_dB = np.nan
+            i0_over_n0_dB = np.nan
             delta_t_over_t_pct = np.nan
             benchmark_ok = False
             visible_flag = False
             visibility_reason = "Descartada pela perda infinita do modelo de baixa elevação."
         else:
             l_path_dB = l_fs_dB + l_atm_dB + l_low_elev_excess_dB
-            i_dBW = eirp_dir_dBW - l_path_dB + g_r_dir_dBi - l_pol_mismatch_dB - l_rx_dB
-            i_W = dBW_to_W(i_dBW)
-            i_over_n_dB = i_dBW - n_dBW
-            delta_t_over_t_pct = 100.0 * (10.0 ** (i_over_n_dB / 10.0))
-            benchmark_ok = bool(i_over_n_dB <= benchmark_i_over_n_dB)
-            visibility_reason = "Considerada no estudo."
+            eirp_density_dBW_per_Hz = eirp_dir_dBW - 10.0 * np.log10(b_tx_Hz)
+
+            if spectral_overlap_flag:
+                i_density_dBW_per_Hz = (
+                    eirp_density_dBW_per_Hz
+                    - l_path_dB
+                    + g_r_dir_dBi
+                    - l_pol_mismatch_dB
+                    - l_rx_dB
+                )
+                i_dBW = i_density_dBW_per_Hz + 10.0 * np.log10(b_ov_Hz)
+                i_W = dBW_to_W(i_dBW)
+                i_over_n_dB = i_dBW - n_dBW
+                i0_over_n0_dB = i_density_dBW_per_Hz - n0_dBW_per_Hz
+                delta_t_over_t_pct = 100.0 * (10.0 ** (i_over_n_dB / 10.0))
+                benchmark_ok = bool(i_over_n_dB <= benchmark_i_over_n_dB)
+                visibility_reason = "Considerada no estudo."
+            else:
+                i_density_dBW_per_Hz = np.nan
+                i_dBW = -np.inf
+                i_W = 0.0
+                i_over_n_dB = -np.inf
+                i0_over_n0_dB = np.nan
+                delta_t_over_t_pct = 0.0
+                benchmark_ok = True
+                visibility_reason = "Geometricamente visível, mas sem sobreposição espectral com o receptor."
     else:
         l_fs_dB = np.nan
         l_low_elev_excess_dB = np.nan
         l_path_dB = np.nan
+        eirp_density_dBW_per_Hz = np.nan
+        i_density_dBW_per_Hz = np.nan
         i_dBW = np.nan
         i_W = 0.0
         i_over_n_dB = np.nan
+        i0_over_n0_dB = np.nan
         delta_t_over_t_pct = np.nan
         benchmark_ok = False
 
@@ -264,13 +344,19 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
         "l_tx_dB": l_tx_dB,
         "pol_tx": pol_tx,
         "b_tx_Hz": b_tx_Hz,
-        "Eh_dB": eh_dB,
+        "b_rx_Hz": b_rx_Hz,
+        "b_ov_Hz": b_ov_Hz,
+        "Eh_dB": horizontal_discrimination_loss_dB,
+        "horizontal_discrimination_loss_dB": horizontal_discrimination_loss_dB,
         "p_tx_dBW": p_tx_dBW,
         "p_ant_dBW": p_ant_dBW,
         "erp_max_dBW": erp_max_dBW,
         "erp_max_kW": erp_max_kW,
         "tx_f_min_MHz": tx_f_min_MHz,
         "tx_f_max_MHz": tx_f_max_MHz,
+        "f_rx_center_MHz": f_rx_center_MHz,
+        "rx_f_min_MHz": rx_f_min_MHz,
+        "rx_f_max_MHz": rx_f_max_MHz,
         "sat_id": sat_id,
         "gso_lon_deg": gso_lon_deg,
         "pol_rx": pol_rx,
@@ -306,17 +392,23 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
         "g_r_dir_offset_dB": g_r_dir_offset_dB,
         "visible_geom_flag": visible_geom_flag,
         "visible_flag": visible_flag,
+        "spectral_overlap_flag": spectral_overlap_flag,
         "visibility_reason": visibility_reason,
         "l_fs_dB": l_fs_dB,
         "l_low_elev_excess_dB": l_low_elev_excess_dB,
         "l_path_dB": l_path_dB,
         "eirp_dir_dBW": eirp_dir_dBW,
+        "eirp_density_dBW_per_Hz": eirp_density_dBW_per_Hz,
         "erp_dir_dBW": erp_dir_dBW,
         "erp_dir_kW": erp_dir_kW,
+        "n0_dBW_per_Hz": n0_dBW_per_Hz,
+        "i_density_dBW_per_Hz": i_density_dBW_per_Hz,
         "i_dBW": i_dBW,
         "i_W": i_W,
         "n_dBW": n_dBW,
         "i_over_n_dB": i_over_n_dB,
+        "i0_over_n0_dB": i0_over_n0_dB,
+        "i_over_n0_dBHz": i0_over_n0_dB,
         "delta_t_over_t_pct": delta_t_over_t_pct,
         "benchmark_ok": benchmark_ok,
     }

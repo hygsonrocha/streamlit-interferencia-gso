@@ -3,6 +3,7 @@ import pandas as pd
 from .budget import W_to_dBW
 
 
+
 def resumir_agregado_por_frequencia(df_resultados: pd.DataFrame) -> pd.DataFrame:
     df_vis = df_resultados[df_resultados["visible_flag"]].copy()
     if df_vis.empty:
@@ -31,9 +32,7 @@ def resumir_agregado_por_frequencia(df_resultados: pd.DataFrame) -> pd.DataFrame
         })
     return pd.DataFrame(linhas).sort_values(by="frequencia_MHz").reset_index(drop=True)
 
-# resumir_agregado_total() só é fisicamente consistente como “agregado cocanal total” 
-# se as estações estiverem no mesmo canal/frequência e com a mesma banda de referência 
-# de ruído.
+
 
 def resumir_agregado_total(df_resultados: pd.DataFrame) -> pd.DataFrame:
     df_vis = df_resultados[df_resultados["visible_flag"]].copy()
@@ -56,6 +55,15 @@ def resumir_agregado_total(df_resultados: pd.DataFrame) -> pd.DataFrame:
     i_over_n_agg_total_dB = i_agg_total_dBW - n_dBW
     delta_t_over_t_agg_total_pct = 100.0 * (10.0 ** (i_over_n_agg_total_dB / 10.0))
 
+    frequencias_unicas = sorted(pd.to_numeric(df_vis["frequencia_MHz"], errors="coerce").dropna().unique())
+    if len(frequencias_unicas) <= 1:
+        observacao = "Cenário cocanal: soma linear de todas as contribuições consideradas visíveis."
+    else:
+        observacao = (
+            "Agregado total calculado por soma linear das contribuições visíveis, mas o conjunto contém múltiplas frequências; "
+            "não interpretar este total como um único cenário estritamente cocanal."
+        )
+
     return pd.DataFrame([
         {
             "n_estacoes_visiveis": int(len(df_vis)),
@@ -64,6 +72,6 @@ def resumir_agregado_total(df_resultados: pd.DataFrame) -> pd.DataFrame:
             "n_dBW": n_dBW,
             "i_over_n_agg_total_dB": i_over_n_agg_total_dB,
             "delta_t_over_t_agg_total_pct": delta_t_over_t_agg_total_pct,
-            "observacao": "Cenário cocanal: soma linear de todas as contribuições consideradas visíveis.",
+            "observacao": observacao,
         }
     ])

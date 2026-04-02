@@ -45,9 +45,9 @@ Para cada estação de TV, o app executa os seguintes passos principais:
 4. estima o ganho da antena de TV na direção do satélite, com base no diagrama vertical adotado;
 5. estima o ganho da antena receptora do satélite em função do off-axis;
 6. calcula a perda de espaço livre, com possibilidade de incluir uma perda adicional simplificada em baixa elevação;
-7. calcula a potência interferente recebida no satélite;
-8. calcula o ruído térmico do receptor;
-9. calcula a relação $I/N$ e a grandeza equivalente $\Delta T/T$;
+7. calcula a densidade espectral de potência interferente na entrada do receptor do satélite;
+8. integra essa densidade na banda efetivamente sobreposta entre o transmissor e o receptor;
+9. calcula o ruído térmico na banda do receptor, a relação $I/N$ e a grandeza equivalente $\Delta T/T$;
 10. soma as contribuições das estações visíveis para obter o agregado.
 
 ---
@@ -134,18 +134,36 @@ onde:
 
 ### Potência interferente no satélite
 
-A potência interferente recebida no satélite é calculada por:
+A potência interferente recebida no satélite é obtida em duas etapas.
+
+Primeiro, calcula-se a densidade espectral de e.i.r.p. do transmissor na direção do satélite:
 
 $$
-I = EIRP_{dir} - L_{path} + G_r - L_{pol} - L_{rx}
+EIRP_0 = EIRP_{dir} - 10\log_{10}(B_{tx})
+$$
+
+Em seguida, calcula-se a densidade espectral interferente na entrada do receptor do satélite:
+
+$$
+I_0 = EIRP_0 - L_{path} + G_r - L_{pol} - L_{rx}
 $$
 
 onde:
 
-- $L_{path}$ inclui a perda de espaço livre e, quando habilitado no modelo, uma perda adicional simplificada em baixa elevação.
+- $L_{path}$ inclui a perda de espaço livre e, quando habilitado no modelo, uma perda adicional simplificada em baixa elevação;
 - $G_r$ é o ganho da antena receptora do satélite;
 - $L_{pol}$ representa a perda de polarização;
 - $L_{rx}$ representa perdas no receptor do satélite.
+
+Por fim, a potência interferente efetiva é obtida integrando essa densidade na banda efetivamente sobreposta:
+
+$$
+B_{ov} = \min(B_{tx}, B_{rx})
+$$
+
+$$
+I = I_0 + 10\log_{10}(B_{ov})
+$$
 
 ---
 
@@ -154,15 +172,15 @@ onde:
 O ruído térmico é calculado por:
 
 $$
-N = -228,6 + 10\log_{10}(T_{sys}) + 10\log_{10}(B)
+N = -228,6 + 10\log_{10}(T_{sys}) + 10\log_{10}(B_{rx})
 $$
 
 onde:
 
 - $T_{sys}$ é a temperatura de ruído do sistema;
-- $B$ é a banda de referência adotada no modelo.
+- $B_{rx}$ é a largura de banda do receptor do satélite.
 
-No modelo atual, o ruído térmico é associado à banda do receptor. Na simplificação cocanal homogênea adotada, assume-se que essa banda é igual à banda do interferente.
+Assim, o ruído é sempre associado à banda em que o receptor integra a potência de ruído.
 
 ---
 
@@ -170,37 +188,45 @@ No modelo atual, o ruído térmico é associado à banda do receptor. Na simplif
 
 Em uma conversa técnica sobre o modelo, foi levantada a dúvida se a largura de banda do canal do satélite poderia ser diferente da largura de banda do sinal interferente, e se isso poderia alterar significativamente os resultados.
 
-A simplificação adotada no estudo é a seguinte:
+A formulação mais consistente é trabalhar com:
 
-- tanto o sinal interferente quanto o receptor vítima podem ser aproximados por **densidades espectrais de potência aproximadamente retangulares**;
-- nesse caso, o que mais importa para a análise é a razão $I/N$ em termos de **densidade de potência**, e não apenas de potências totais.
+- densidade espectral de potência interferente;
+- densidade espectral de ruído;
+- banda efetivamente sobreposta entre o transmissor e o receptor.
 
-Ou seja, pode-se pensar em:
-
-$$
-i = \frac{I}{b_{interferente}}
-$$
+Em termos conceituais, pode-se definir:
 
 $$
-n = \frac{N}{b_{vitima}}
+i = \frac{I}{B_{ov}}
 $$
 
-e trabalhar a comparação entre as densidades de potência interferente e de ruído.
-
-Essa abordagem ajuda a tornar a análise mais robusta quando há dúvida sobre a largura de banda absoluta de cada sistema.
-
-No código atual, por simplificação, está sendo adotado:
-
 $$
-b_{interferente} = b_{vitima}
+n_0 = \frac{N}{B_{rx}}
 $$
 
-Nessa situação, a análise de $I/N$ calculada com as potências totais já permanece **consistente com essa simplificação**, porque as bandas de referência coincidem.
+ou, equivalentemente, trabalhar com as densidades espectrais $I_0$ e $N_0$.
 
-Em outras palavras:
+No caso geral, a relação entre potência interferente e ruído é:
 
-- quando as duas bandas são iguais, usar potências totais ou densidades de potência leva à mesma razão $I/N$;
-- se, no futuro, for necessário estudar casos em que as bandas sejam diferentes, o caminho natural é passar a trabalhar explicitamente com **densidades de potência**.
+$$
+\frac{I}{N} = \frac{I_0}{N_0} \cdot \frac{B_{ov}}{B_{rx}}
+$$
+
+Portanto, a igualdade direta entre $I/N$ e $I_0/N_0$ só vale quando a banda efetivamente sobreposta coincide com a banda do receptor.
+
+Na simplificação cocanal homogênea em que:
+
+$$
+B_{tx} = B_{rx}
+$$
+
+tem-se também:
+
+$$
+B_{ov} = B_{rx}
+$$
+
+e, nesse caso, a análise se reduz naturalmente ao caso mais simples.
 
 ---
 
@@ -257,7 +283,8 @@ O modelo atual utiliza as seguintes hipóteses principais:
 - ganho RX do satélite obtido a partir de um modelo baseado na Recomendação ITU-R S.672-4;
 - polarização representada por uma **perda global de mismatch**;
 - possibilidade de aplicar uma **perda adicional em baixa elevação**;
-- cálculo de ruído coerente com o cenário cocanal homogêneo.
+- cálculo da interferência a partir da densidade espectral de potência interferente integrada na banda efetivamente sobreposta;
+- cálculo de ruído na banda do receptor.
 
 ---
 

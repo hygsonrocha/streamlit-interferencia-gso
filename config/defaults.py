@@ -21,6 +21,7 @@ params_rx_sat = {
     "gso_lon_deg": -30.0,
     "pol_rx": "M",
     "t_sys_K": 700.0,
+    "f_rx_center_MHz": 300.0,
     "b_rx_Hz": 6_000_000.0,
     "l_rx_dB": 0.0,
     "g_r_max_dBi": 23.0,
@@ -43,7 +44,6 @@ def build_tx_pattern_bt1195_fig19():
     - a malha final é densa (0,1°), para deixar o gráfico do app suave.
     """
 
-    # Pontos de controle aproximados da Figura 19 (ângulo em graus, E/Emax)
     ctrl_angle_deg = np.array([
          0,   1,   2,   3,   4,   5,   6,   7,   8,   9,  10,
         11,  12,  13,  14,  15,  16,  17,  18,  19,  20,
@@ -62,14 +62,13 @@ def build_tx_pattern_bt1195_fig19():
 
     angle_deg = np.arange(0.0, 90.0 + 0.1, 0.1, dtype=float)
     e_rel = np.interp(angle_deg, ctrl_angle_deg, ctrl_e_rel)
-
-    # Garantias numéricas
     e_rel = np.clip(e_rel, 1e-6, 1.0)
 
     return {
         "angle_deg": angle_deg,
         "e_rel": e_rel,
     }
+
 
 
 tx_pattern = build_tx_pattern_bt1195_fig19()

@@ -83,7 +83,7 @@ def formatar_resultados_para_exibicao(df_resultados: pd.DataFrame) -> pd.DataFra
         "i_dBW",
         "n0_dBW_per_Hz",
         "n_dBW",
-        "i_over_n0_dBHz",
+        "i0_over_n0_dB",
         "i_over_n_dB",
         "delta_t_over_t_pct",
         "visible_flag",
@@ -111,7 +111,7 @@ def formatar_resultados_para_exibicao(df_resultados: pd.DataFrame) -> pd.DataFra
         "i_dBW": "Potência interferente no satélite, I [dBW]",
         "n0_dBW_per_Hz": "Densidade de ruído, N0 [dBW/Hz]",
         "n_dBW": "Ruído no receptor, N [dBW]",
-        "i_over_n0_dBHz": "I0/N0 [dB]",
+        "i0_over_n0_dB": "I0/N0 [dB]",
         "i_over_n_dB": "I/N [dB]",
         "delta_t_over_t_pct": "ΔT/T [%]",
         "visible_flag": "Visível",
@@ -299,7 +299,7 @@ def montar_params_tx_ui():
         p["ant_height_m"] = st.number_input("Altura da antena [m]", value=float(p["ant_height_m"]))
         p["p_tx_kW"] = st.number_input("Potência TX [kW]", value=float(p["p_tx_kW"]), min_value=0.001)
         p["g_t_max_dBd"] = st.number_input("Ganho TX máximo [dBd]", value=float(p["g_t_max_dBd"]))
-        p["tilt_deg"] = st.number_input("Tilt [graus]", value=float(p["tilt_deg"]))
+        p["tilt_deg"] = st.number_input("Downtilt [graus, positivo para baixo]", value=float(p["tilt_deg"]))
         p["l_atm_dB"] = st.number_input("Perda adicional de percurso [dB]", value=float(p["l_atm_dB"]))
         p["l_pol_mismatch_dB"] = st.number_input("Perda de polarização [dB]", value=float(p["l_pol_mismatch_dB"]))
         p["line_length_m"] = st.number_input("Comprimento da linha [m]", value=float(p["line_length_m"]), min_value=0.0)
@@ -307,7 +307,7 @@ def montar_params_tx_ui():
         p["accessory_losses_dB"] = st.number_input("Perdas acessórias [dB]", value=float(p["accessory_losses_dB"]), min_value=0.0)
         p["pol_tx"] = st.selectbox("Polarização TX", options=["horizontal", "vertical", "eliptica", "circular"], index=0)
         p["b_tx_Hz"] = st.number_input("Banda TX [Hz]", value=float(p["b_tx_Hz"]), min_value=1.0, step=1000000.0)
-        p["Eh_dB"] = st.number_input("Discriminação horizontal adicional [dB]", value=float(p["Eh_dB"]))
+        p["Eh_dB"] = st.number_input("Perda/discriminação horizontal adicional [dB]", value=float(p["Eh_dB"]))
     return p
 
 
@@ -319,6 +319,7 @@ def montar_params_rx_ui():
         p["gso_lon_deg"] = st.number_input("Longitude orbital GSO [graus]", value=float(p["gso_lon_deg"]))
         p["pol_rx"] = st.text_input("Polarização RX", value=str(p["pol_rx"]))
         p["t_sys_K"] = st.number_input("T_sys [K]", value=float(p["t_sys_K"]), min_value=1.0)
+        p["f_rx_center_MHz"] = st.number_input("Frequência central RX [MHz]", value=float(p["f_rx_center_MHz"]))
         p["b_rx_Hz"] = st.number_input("Banda RX [Hz]", value=float(p["b_rx_Hz"]), min_value=1.0, step=1000000.0)
         p["l_rx_dB"] = st.number_input("Perdas RX [dB]", value=float(p["l_rx_dB"]))
         p["g_r_max_dBi"] = st.number_input("Ganho máximo RX [dBi]", value=float(p["g_r_max_dBi"]))
@@ -326,7 +327,7 @@ def montar_params_rx_ui():
         p["ln_db"] = st.selectbox("ln_db", options=[-20.0, -25.0], index=0 if float(p["ln_db"]) == -20.0 else 1)
         p["lf_db"] = st.number_input("lf_db [dBi]", value=float(p["lf_db"]))
         p["benchmark_i_over_n_dB"] = st.number_input("I/N máximo de proteção [dB]", value=float(p["benchmark_i_over_n_dB"]))
-        p["elev_min_deg"] = st.number_input("Elevação mínima adotada [graus]", value=float(p["elev_min_deg"]))
+        p["elev_min_deg"] = st.number_input("Elevação mínima adotada [graus]", value=float(p["elev_min_deg"]), min_value=0.0)
         p["apply_low_elevation_excess_loss"] = st.checkbox(
             "Aplicar perda extra em baixa elevação",
             value=bool(p["apply_low_elevation_excess_loss"]),
@@ -522,7 +523,7 @@ def plot_diagrama_vertical_tv_linear(params_tx_ui, tx_pattern, df_resultados=Non
     e_rel = np.asarray(tx_pattern["e_rel"], dtype=float)
 
     ev_dB = 20.0 * np.log10(np.maximum(e_rel, 1e-12))
-    g_dir_dBd = float(params_tx_ui["g_t_max_dBd"]) + float(params_tx_ui["Eh_dB"]) + ev_dB
+    g_dir_dBd = float(params_tx_ui["g_t_max_dBd"]) - float(params_tx_ui["Eh_dB"]) + ev_dB
     g_dir_linear = 10.0 ** (g_dir_dBd / 10.0)
 
     fig, ax = plt.subplots(figsize=(10, 5))
@@ -554,7 +555,7 @@ def plot_diagrama_vertical_tv_db(params_tx_ui, tx_pattern, df_resultados=None):
     e_rel = np.asarray(tx_pattern["e_rel"], dtype=float)
 
     ev_dB = 20.0 * np.log10(np.maximum(e_rel, 1e-12))
-    g_dir_dBd = float(params_tx_ui["g_t_max_dBd"]) + float(params_tx_ui["Eh_dB"]) + ev_dB
+    g_dir_dBd = float(params_tx_ui["g_t_max_dBd"]) - float(params_tx_ui["Eh_dB"]) + ev_dB
 
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.plot(angle_deg, g_dir_dBd, label="Ganho TV no plano vertical [dBd]")
