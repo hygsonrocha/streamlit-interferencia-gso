@@ -4,8 +4,21 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-from config.defaults import params_tx_default, params_rx_sat, tx_pattern, estacoes_exemplo
-from core.antenna import ganho_antena_gso_s672
+from config.defaults import (
+    params_tx_default,
+    params_rx_sat,
+    estacoes_exemplo,
+    TX_VERTICAL_HPBW_TARGET_DEG,
+    GSO_LON_MIN_DEG,
+    GSO_LON_MAX_DEG,
+    GSO_LON_STEP_DEG,
+)
+from core.antenna import (
+    ganho_antena_gso_s672,
+    build_tx_pattern_analytic,
+    build_rx_pattern_s672,
+    resolve_psi_b_deg,
+)
 from core.budget import (
     validar_estacoes,
     validar_tx_pattern,
@@ -231,7 +244,7 @@ def formatar_varredura_para_exibicao(df_scan: pd.DataFrame) -> pd.DataFrame:
         "n_estacoes_visiveis": "Nº de estações visíveis",
         "i_agg_total_dBW": "I agregado total [dBW]",
         "i_over_n_agg_total_dB": "I/N agregado total [dB]",
-        "benchmark_i_over_n_dB": "Benchmark de I/N [dB]",
+        "benchmark_i_over_n_dB": "Alvo agregado de I/N [dB]",
         "atende_criterio": "Atende ao critério",
     }
     df = df.rename(columns=rename_map)
@@ -241,7 +254,7 @@ def formatar_varredura_para_exibicao(df_scan: pd.DataFrame) -> pd.DataFrame:
         "Ganho RX máximo [dBi]",
         "I agregado total [dBW]",
         "I/N agregado total [dB]",
-        "Benchmark de I/N [dB]",
+        "Alvo agregado de I/N [dB]",
     ]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").round(2)
@@ -265,7 +278,7 @@ def formatar_faixas_para_exibicao(df_ranges: pd.DataFrame) -> pd.DataFrame:
         "largura_deg_amostrada": "Largura amostrada [°]",
         "i_over_n_min_dB_na_faixa": "I/N mínimo na faixa [dB]",
         "i_over_n_max_dB_na_faixa": "I/N máximo na faixa [dB]",
-        "benchmark_i_over_n_dB": "Benchmark de I/N [dB]",
+        "benchmark_i_over_n_dB": "Alvo agregado de I/N [dB]",
         "lon_step_deg": "Passo [°]",
         "observacao": "Observação",
     }
@@ -278,13 +291,50 @@ def formatar_faixas_para_exibicao(df_ranges: pd.DataFrame) -> pd.DataFrame:
         "Largura amostrada [°]",
         "I/N mínimo na faixa [dB]",
         "I/N máximo na faixa [dB]",
-        "Benchmark de I/N [dB]",
+        "Alvo agregado de I/N [dB]",
         "Passo [°]",
     ]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").round(2)
 
     return df
+
+
+def build_tx_pattern_from_params(params_tx_ui: dict) -> dict:
+    tx_pattern = build_tx_pattern_analytic(
+        n_levels=int(params_tx_ui["tx_n_levels"]),
+        d_lambda=float(params_tx_ui["tx_d_lambda"]),
+        use_binomial=bool(params_tx_ui["tx_use_binomial"]),
+        beta_tilt_deg=float(params_tx_ui["tx_beta_tilt_deg"]),
+        target_hpbw_deg=TX_VERTICAL_HPBW_TARGET_DEG,
+    )
+    validar_tx_pattern(tx_pattern)
+    return tx_pattern
+
+
+def build_rx_pattern_from_params(params_rx_ui: dict) -> dict:
+    return build_rx_pattern_s672(
+        gmax_dbi=float(params_rx_ui["g_r_max_dBi"]),
+        psi_b_deg=params_rx_ui.get("psi_b_deg"),
+        eta_ap=float(params_rx_ui.get("eta_ap", 0.60)),
+        ln_db=float(params_rx_ui["ln_db"]),
+        lf_db=float(params_rx_ui["lf_db"]),
+    )
+
+
+def rx_psi_b_used_from_params(params_rx_ui: dict) -> float:
+    return resolve_psi_b_deg(
+        gmax_dbi=float(params_rx_ui["g_r_max_dBi"]),
+        psi_b_deg=params_rx_ui.get("psi_b_deg"),
+        eta_ap=float(params_rx_ui.get("eta_ap", 0.60)),
+    )
+
+def get_tx_mode_options():
+    return {
+        "Potência TX + perdas + ganho": "potencia_tx",
+        "ERP máxima direta": "erp_max_direta",
+    }
+
 
 
 # ============================================================
@@ -297,9 +347,33 @@ def montar_params_tx_ui():
         p = dict(params_tx_default)
         p["site_alt_m"] = st.number_input("Altitude do local [m]", value=float(p["site_alt_m"]))
         p["ant_height_m"] = st.number_input("Altura da antena [m]", value=float(p["ant_height_m"]))
-        p["p_tx_kW"] = st.number_input("Potência TX [kW]", value=float(p["p_tx_kW"]), min_value=0.001)
+
+        tx_mode_options = get_tx_mode_options()
+        tx_mode_labels = list(tx_mode_options.keys())
+        tx_mode_values = list(tx_mode_options.values())
+        default_tx_mode = str(p.get("tx_input_mode", "potencia_tx"))
+        if default_tx_mode not in tx_mode_values:
+            default_tx_mode = "potencia_tx"
+        selected_tx_mode_label = st.selectbox(
+            "Modo de entrada TX",
+            options=tx_mode_labels,
+            index=tx_mode_values.index(default_tx_mode),
+        )
+        p["tx_input_mode"] = tx_mode_options[selected_tx_mode_label]
+
+        if p["tx_input_mode"] == "potencia_tx":
+            p["p_tx_kW"] = st.number_input("Potência TX [kW]", value=float(p["p_tx_kW"]), min_value=0.001)
+        else:
+            p["erp_max_input_kW"] = st.number_input(
+                "ERP máxima direta [kW]",
+                value=float(p.get("erp_max_input_kW", 1.0)),
+                min_value=1e-6,
+                format="%.6f",
+            )
+            st.caption("Neste modo, a ERP máxima é a entrada principal. As perdas de linha abaixo são usadas apenas para retrocalcular a potência equivalente antes da antena.")
+
         p["g_t_max_dBd"] = st.number_input("Ganho TX máximo [dBd]", value=float(p["g_t_max_dBd"]))
-        p["tilt_deg"] = st.number_input("Downtilt [graus, positivo para baixo]", value=float(p["tilt_deg"]))
+        p["tilt_deg"] = st.number_input("Downtilt mecânico [graus, positivo para baixo]", value=float(p["tilt_deg"]))
         p["l_atm_dB"] = st.number_input("Perda adicional de percurso [dB]", value=float(p["l_atm_dB"]))
         p["l_pol_mismatch_dB"] = st.number_input("Perda de polarização [dB]", value=float(p["l_pol_mismatch_dB"]))
         p["line_length_m"] = st.number_input("Comprimento da linha [m]", value=float(p["line_length_m"]), min_value=0.0)
@@ -307,9 +381,32 @@ def montar_params_tx_ui():
         p["accessory_losses_dB"] = st.number_input("Perdas acessórias [dB]", value=float(p["accessory_losses_dB"]), min_value=0.0)
         p["pol_tx"] = st.selectbox("Polarização TX", options=["horizontal", "vertical", "eliptica", "circular"], index=0)
         p["b_tx_Hz"] = st.number_input("Banda TX [Hz]", value=float(p["b_tx_Hz"]), min_value=1.0, step=1000000.0)
-        p["Eh_dB"] = st.number_input("Perda/discriminação horizontal adicional [dB]", value=float(p["Eh_dB"]))
-    return p
+        p["Eh_dB"] = st.number_input("Discriminação horizontal adicional [dB]", value=float(p["Eh_dB"]))
 
+        st.markdown("### Modelo analítico da antena TX")
+        p["tx_n_levels"] = st.selectbox(
+            "Níveis verticais da antena TX",
+            options=sorted(TX_VERTICAL_HPBW_TARGET_DEG.keys()),
+            index=sorted(TX_VERTICAL_HPBW_TARGET_DEG.keys()).index(int(p["tx_n_levels"])),
+        )
+        p["tx_d_lambda"] = st.number_input(
+            "Espaçamento vertical d/λ",
+            value=float(p["tx_d_lambda"]),
+            min_value=0.01,
+            step=0.05,
+            format="%.2f",
+        )
+        p["tx_use_binomial"] = st.checkbox(
+            "Usar pesos binomiais (null-filling simples)",
+            value=bool(p["tx_use_binomial"]),
+        )
+        p["tx_beta_tilt_deg"] = st.number_input(
+            "Tilt elétrico β [graus]",
+            value=float(p["tx_beta_tilt_deg"]),
+            step=0.1,
+            format="%.2f",
+        )
+    return p
 
 def montar_params_rx_ui():
     with st.sidebar:
@@ -323,10 +420,30 @@ def montar_params_rx_ui():
         p["b_rx_Hz"] = st.number_input("Banda RX [Hz]", value=float(p["b_rx_Hz"]), min_value=1.0, step=1000000.0)
         p["l_rx_dB"] = st.number_input("Perdas RX [dB]", value=float(p["l_rx_dB"]))
         p["g_r_max_dBi"] = st.number_input("Ganho máximo RX [dBi]", value=float(p["g_r_max_dBi"]))
-        p["psi_b_deg"] = st.number_input("Semi-largura de feixe psi_b [graus]", value=float(p["psi_b_deg"]), min_value=1e-6)
+        p["eta_ap"] = st.number_input("Eficiência de abertura η_ap", value=float(p.get("eta_ap", 0.60)), min_value=0.01, max_value=1.0, step=0.01, format="%.2f")
+
+        psi_b_auto_default = p.get("psi_b_deg") is None
+        psi_b_auto = st.checkbox("Calcular psi_b automaticamente a partir de G_max e η_ap", value=psi_b_auto_default)
+        if psi_b_auto:
+            p["psi_b_deg"] = None
+            st.caption(f"psi_b usado no padrão RX = {rx_psi_b_used_from_params(p):.3f}°")
+        else:
+            psi_b_initial = p.get("psi_b_deg")
+            if psi_b_initial is None:
+                psi_b_initial = rx_psi_b_used_from_params(p)
+            p["psi_b_deg"] = st.number_input("Semi-largura de feixe psi_b [graus]", value=float(psi_b_initial), min_value=1e-6)
+
         p["ln_db"] = st.selectbox("ln_db", options=[-20.0, -25.0], index=0 if float(p["ln_db"]) == -20.0 else 1)
         p["lf_db"] = st.number_input("lf_db [dBi]", value=float(p["lf_db"]))
-        p["benchmark_i_over_n_dB"] = st.number_input("I/N máximo de proteção [dB]", value=float(p["benchmark_i_over_n_dB"]))
+        p["single_entry_limit_i_over_n_dB"] = st.number_input(
+            "Limite de I/N single-entry [dB]",
+            value=float(p.get("single_entry_limit_i_over_n_dB", p["benchmark_i_over_n_dB"])),
+        )
+        p["aggregate_target_i_over_n_dB"] = st.number_input(
+            "Alvo de I/N agregado [dB]",
+            value=float(p.get("aggregate_target_i_over_n_dB", p["benchmark_i_over_n_dB"])),
+        )
+        p["benchmark_i_over_n_dB"] = float(p["aggregate_target_i_over_n_dB"])
         p["elev_min_deg"] = st.number_input("Elevação mínima adotada [graus]", value=float(p["elev_min_deg"]), min_value=0.0)
         p["apply_low_elevation_excess_loss"] = st.checkbox(
             "Aplicar perda extra em baixa elevação",
@@ -342,7 +459,7 @@ def montar_params_rx_ui():
 def rodar_cenario(df_estacoes_edit, params_tx_ui, params_rx_ui):
     estacoes = df_estacoes_edit.to_dict(orient="records")
     validar_estacoes(estacoes)
-    validar_tx_pattern(tx_pattern)
+    tx_pattern = build_tx_pattern_from_params(params_tx_ui)
 
     estacoes_expandidas = expandir_estacoes_com_defaults(estacoes, params_tx_ui)
     resultados = [
@@ -368,7 +485,7 @@ def rodar_cenario(df_estacoes_edit, params_tx_ui, params_rx_ui):
 def rodar_varredura(estacoes_df, params_tx_ui, params_rx_ui, lon_min_deg, lon_max_deg, lon_step_deg, g_r_list):
     estacoes = estacoes_df.to_dict(orient="records")
     validar_estacoes(estacoes)
-    validar_tx_pattern(tx_pattern)
+    tx_pattern = build_tx_pattern_from_params(params_tx_ui)
 
     estacoes_expandidas = expandir_estacoes_com_defaults(estacoes, params_tx_ui)
 
@@ -391,10 +508,10 @@ def rodar_varredura(estacoes_df, params_tx_ui, params_rx_ui, lon_min_deg, lon_ma
                 "n_estacoes_visiveis": res["n_estacoes_visiveis"],
                 "i_agg_total_dBW": res["i_agg_total_dBW"],
                 "i_over_n_agg_total_dB": res["i_over_n_agg_total_dB"],
-                "benchmark_i_over_n_dB": float(params_rx_ui["benchmark_i_over_n_dB"]),
+                "benchmark_i_over_n_dB": float(res.get("aggregate_target_i_over_n_dB", params_rx_ui["aggregate_target_i_over_n_dB"])),
                 "atende_criterio": bool(
                     pd.notna(res["i_over_n_agg_total_dB"])
-                    and (res["i_over_n_agg_total_dB"] <= float(params_rx_ui["benchmark_i_over_n_dB"]))
+                    and (res["i_over_n_agg_total_dB"] <= float(res.get("aggregate_target_i_over_n_dB", params_rx_ui["aggregate_target_i_over_n_dB"])))
                 ),
             })
 
@@ -480,14 +597,14 @@ def plot_crescimento(df_resultados: pd.DataFrame):
     return fig
 
 
-def plot_agregado_vs_benchmark(df_resultados: pd.DataFrame, df_agregado_total: pd.DataFrame):
+def plot_agregado_vs_benchmark(df_resultados: pd.DataFrame, df_agregado_total: pd.DataFrame, aggregate_target_i_over_n_dB: float):
     df_vis = df_resultados[df_resultados["visible_flag"]].copy()
     if df_vis.empty or df_agregado_total.empty:
         return None
 
     pior_individual_in = float(df_vis["i_over_n_dB"].max())
     agregado_in = float(df_agregado_total["i_over_n_agg_total_dB"].iloc[0])
-    benchmark = float(df_vis["benchmark_i_over_n_dB"].iloc[0])
+    benchmark = float(aggregate_target_i_over_n_dB)
 
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.bar(["Pior individual", "Agregado cocanal"], [pior_individual_in, agregado_in])
@@ -581,14 +698,9 @@ def plot_diagrama_vertical_tv_db(params_tx_ui, tx_pattern, df_resultados=None):
 
 
 def plot_diagrama_satelite_linear(params_rx_ui, df_resultados=None):
-    psi_deg = np.linspace(0.0, 180.0, 2001)
-    g_r_dBi = ganho_antena_gso_s672(
-        psi_deg=psi_deg,
-        gmax_dbi=float(params_rx_ui["g_r_max_dBi"]),
-        psi_b_deg=float(params_rx_ui["psi_b_deg"]),
-        ln_db=float(params_rx_ui["ln_db"]),
-        lf_db=float(params_rx_ui["lf_db"]),
-    )
+    rx_pattern = build_rx_pattern_from_params(params_rx_ui)
+    psi_deg = np.asarray(rx_pattern["angle_deg"], dtype=float)
+    g_r_dBi = np.asarray(rx_pattern["gain_dbi"], dtype=float)
     g_r_linear = 10.0 ** (g_r_dBi / 10.0)
 
     fig, ax = plt.subplots(figsize=(10, 5))
@@ -616,14 +728,9 @@ def plot_diagrama_satelite_linear(params_rx_ui, df_resultados=None):
 
 
 def plot_diagrama_satelite_db(params_rx_ui, df_resultados=None):
-    psi_deg = np.linspace(0.0, 180.0, 2001)
-    g_r_dBi = ganho_antena_gso_s672(
-        psi_deg=psi_deg,
-        gmax_dbi=float(params_rx_ui["g_r_max_dBi"]),
-        psi_b_deg=float(params_rx_ui["psi_b_deg"]),
-        ln_db=float(params_rx_ui["ln_db"]),
-        lf_db=float(params_rx_ui["lf_db"]),
-    )
+    rx_pattern = build_rx_pattern_from_params(params_rx_ui)
+    psi_deg = np.asarray(rx_pattern["angle_deg"], dtype=float)
+    g_r_dBi = np.asarray(rx_pattern["gain_dbi"], dtype=float)
 
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.plot(psi_deg, g_r_dBi, label="Ganho RX do satélite [dBi]")
@@ -718,7 +825,10 @@ with col_left:
 with col_right:
     st.subheader("Estação modelo")
     st.metric("ERP máxima [kW]", f"{metricas_modelo['erp_max_kW']:.2f}")
-    st.caption("Calculada a partir da potência, perdas de linha e ganho máximo da antena.")
+    if str(params_tx_ui.get("tx_input_mode", "potencia_tx")) == "erp_max_direta":
+        st.caption("Entrada direta de ERP máxima. A potência TX equivalente é retrocalculada a partir das perdas e do ganho máximo.")
+    else:
+        st.caption("Calculada a partir da potência, perdas de linha e ganho máximo da antena.")
 
 tab1, tab2, tab3, tab4 = st.tabs([
     "Cenário único",
@@ -780,13 +890,18 @@ with tab1:
             if pd.notna(df_agregado_total["i_over_n_agg_total_dB"].iloc[0])
             else None
         )
-        benchmark = float(params_rx_ui["benchmark_i_over_n_dB"])
+        benchmark = float(params_rx_ui["aggregate_target_i_over_n_dB"])
 
         if agg_in is not None:
             if agg_in <= benchmark:
-                st.success("O agregado atende ao benchmark preliminar.")
+                st.success("O agregado atende ao alvo de I/N agregado.")
             else:
-                st.error("O agregado excede o benchmark preliminar.")
+                st.error("O agregado excede o alvo de I/N agregado.")
+
+        st.caption(
+            f"Critérios em uso: single-entry = {float(params_rx_ui['single_entry_limit_i_over_n_dB']):.2f} dB; "
+            f"agregado = {float(params_rx_ui['aggregate_target_i_over_n_dB']):.2f} dB."
+        )
 
         st.subheader("Resultados por estação")
 
@@ -844,7 +959,11 @@ with tab1:
         if fig3 is not None:
             st.pyplot(fig3)
 
-        fig4 = plot_agregado_vs_benchmark(df_resultados, df_agregado_total)
+        fig4 = plot_agregado_vs_benchmark(
+            df_resultados,
+            df_agregado_total,
+            float(params_rx_ui["aggregate_target_i_over_n_dB"]),
+        )
         if fig4 is not None:
             st.pyplot(fig4)
 
@@ -869,9 +988,9 @@ with tab1:
 
 with tab2:
     colA, colB, colC = st.columns(3)
-    lon_min_deg = colA.number_input("Longitude mínima [graus]", value=-141.0)
-    lon_max_deg = colB.number_input("Longitude máxima [graus]", value=46.0)
-    lon_step_deg = colC.number_input("Passo [graus]", value=1.0, min_value=0.1)
+    lon_min_deg = colA.number_input("Longitude mínima [graus]", value=float(GSO_LON_MIN_DEG))
+    lon_max_deg = colB.number_input("Longitude máxima [graus]", value=float(GSO_LON_MAX_DEG))
+    lon_step_deg = colC.number_input("Passo [graus]", value=float(GSO_LON_STEP_DEG), min_value=0.1)
     g_r_list_str = st.text_input("Lista de ganhos RX máximos [dBi]", value="18,23,35")
 
     if st.button("Rodar varredura GSO"):
@@ -934,23 +1053,40 @@ with tab3:
 
     with col_tv:
         st.markdown("### Antena de TV")
-        st.caption("Acima: ganho em escala linear. Abaixo: ganho em dB, usando o diagrama vertical adotado no modelo.")
+        tx_pattern_current = build_tx_pattern_from_params(params_tx_ui)
+        st.caption(r"Acima: ganho em escala linear. Abaixo: ganho em dB, usando o modelo analítico vertical $E_{TX}(\theta)=E_{elem}(\theta)\,AF_N(\theta)$." )
 
-        fig_tv_lin = plot_diagrama_vertical_tv_linear(params_tx_ui, tx_pattern, df_resultados_pattern)
+        fig_tv_lin = plot_diagrama_vertical_tv_linear(params_tx_ui, tx_pattern_current, df_resultados_pattern)
         st.pyplot(fig_tv_lin)
 
-        fig_tv_db = plot_diagrama_vertical_tv_db(params_tx_ui, tx_pattern, df_resultados_pattern)
+        fig_tv_db = plot_diagrama_vertical_tv_db(params_tx_ui, tx_pattern_current, df_resultados_pattern)
         st.pyplot(fig_tv_db)
+
+        st.caption(
+            f"HPBW do padrão TX selecionado: {float(tx_pattern_current['selected_hpbw_deg']):.2f}°. "
+            f"q = {float(tx_pattern_current['q_element']):.4f}; d/λ = {float(tx_pattern_current['d_lambda']):.2f}; "
+            f"pesos = {'binomial' if bool(tx_pattern_current['use_binomial']) else 'uniformes'}."
+        )
+        st.dataframe(pd.DataFrame(tx_pattern_current["calibration_report"]), use_container_width=True, hide_index=True)
 
     with col_sat:
         st.markdown("### Antena do satélite GSO")
-        st.caption("Acima: ganho em escala linear. Abaixo: ganho em dB, conforme o modelo RX adotado no estudo.")
+        rx_pattern_current = build_rx_pattern_from_params(params_rx_ui)
+        st.caption("Acima: ganho em escala linear. Abaixo: ganho em dB, conforme o envelope simplificado inspirado na ITU-R S.672-4.")
 
         fig_sat_lin = plot_diagrama_satelite_linear(params_rx_ui, df_resultados_pattern)
         st.pyplot(fig_sat_lin)
 
         fig_sat_db = plot_diagrama_satelite_db(params_rx_ui, df_resultados_pattern)
         st.pyplot(fig_sat_db)
+
+        psi_b_source = "calculado" if rx_pattern_current["psi_b_deg_input"] is None else "explícito"
+        st.caption(
+            f"psi_b usado: {float(rx_pattern_current['psi_b_deg_used']):.3f}° ({psi_b_source}); "
+            f"η_ap = {float(rx_pattern_current['eta_ap']):.2f}; "
+            f"ln = {float(rx_pattern_current['ln_db']):.1f} dB; "
+            f"lf = {float(rx_pattern_current['lf_db']):.1f} dBi."
+        )
 
     st.info(
         "Se a simulação do cenário único já tiver sido rodada, os diagramas mostram também os pontos "
@@ -981,7 +1117,7 @@ Nesta aba, você encontra:
 - calcula a densidade espectral de potência interferente na entrada do receptor;
 - integra essa densidade na banda efetivamente sobreposta entre transmissor e receptor;
 - calcula o ruído térmico na banda do receptor;
-- calcula $I/N$ e $\Delta T/T$.
+- calcula $I/N$ e $\\Delta T/T$.
 
 **Agregação**
 - soma as contribuições das estações visíveis em unidade linear;
@@ -999,7 +1135,7 @@ Nesta aba, você encontra:
 - satélite GSO ideal;
 - análise estática;
 - foco em interferência agregada cocanal;
-- ganho da antena de TV estimado a partir de um diagrama vertical baseado na Recomendação ITU-R BT.1195-1;
+- ganho da antena de TV estimado a partir de um modelo analítico vertical com fator de elemento e fator de arranjo calibrado pelos valores de HPBW do datasheet;
 - ganho RX do satélite obtido a partir de um modelo baseado na Recomendação ITU-R S.672-4;
 - polarização tratada por perda global de mismatch;
 - possibilidade de aplicar uma perda adicional em baixa elevação;

@@ -1,6 +1,6 @@
 import numpy as np
 from .geometry import geodetic_to_ecef, gso_to_ecef, ecef_to_enu_matrix, unit_vector, angle_between_vectors_deg
-from .antenna import ganho_antena_gso_s672, low_elevation_excess_loss_dB
+from .antenna import ganho_antena_gso_s672, low_elevation_excess_loss_dB, resolve_psi_b_deg
 
 
 DBD_TO_DBI = 2.15
@@ -75,31 +75,52 @@ def validar_tx_pattern(tx_pattern: dict) -> None:
         raise ValueError("'e_rel' deve conter apenas valores positivos.")
 
 
+def resolver_metricas_tx_estacao(estacao: dict) -> dict:
+    tx_input_mode = str(estacao.get("tx_input_mode", "potencia_tx")).strip().lower()
 
-def calcular_metricas_estacao_modelo(params_tx: dict) -> dict:
-    p_tx_kW = float(params_tx["p_tx_kW"])
-    g_t_max_dBd = float(params_tx["g_t_max_dBd"])
-    line_length_m = float(params_tx["line_length_m"])
-    line_att_dB_per_100m = float(params_tx["line_att_dB_per_100m"])
-    accessory_losses_dB = float(params_tx["accessory_losses_dB"])
-
-    if p_tx_kW <= 0.0:
-        raise ValueError("p_tx_kW deve ser positivo.")
-
+    g_t_max_dBd = float(estacao["g_t_max_dBd"])
+    line_length_m = float(estacao.get("line_length_m", 0.0))
+    line_att_dB_per_100m = float(estacao.get("line_att_dB_per_100m", 0.0))
+    accessory_losses_dB = float(estacao.get("accessory_losses_dB", 0.0))
     l_tx_dB = line_att_dB_per_100m * (line_length_m / 100.0) + accessory_losses_dB
-    p_tx_dBW = 10.0 * np.log10(p_tx_kW * 1000.0)
-    p_ant_dBW = p_tx_dBW - l_tx_dB
 
-    erp_max_dBW = p_ant_dBW + g_t_max_dBd
-    erp_max_kW = dBW_to_W(erp_max_dBW) / 1000.0
+    if tx_input_mode == "erp_max_direta":
+        erp_max_input_kW = float(estacao["erp_max_input_kW"])
+        if erp_max_input_kW <= 0.0:
+            raise ValueError("erp_max_input_kW deve ser positivo.")
+
+        erp_max_dBW = 10.0 * np.log10(erp_max_input_kW * 1000.0)
+        p_ant_dBW = erp_max_dBW - g_t_max_dBd
+        p_tx_dBW = p_ant_dBW + l_tx_dB
+        p_tx_kW = dBW_to_W(p_tx_dBW) / 1000.0
+        erp_max_kW = erp_max_input_kW
+    elif tx_input_mode == "potencia_tx":
+        p_tx_kW = float(estacao["p_tx_kW"])
+        if p_tx_kW <= 0.0:
+            raise ValueError("p_tx_kW deve ser positivo.")
+
+        p_tx_dBW = 10.0 * np.log10(p_tx_kW * 1000.0)
+        p_ant_dBW = p_tx_dBW - l_tx_dB
+        erp_max_dBW = p_ant_dBW + g_t_max_dBd
+        erp_max_kW = dBW_to_W(erp_max_dBW) / 1000.0
+    else:
+        raise ValueError("tx_input_mode inválido. Use 'potencia_tx' ou 'erp_max_direta'.")
 
     return {
+        "tx_input_mode": tx_input_mode,
         "l_tx_dB": l_tx_dB,
+        "p_tx_kW": p_tx_kW,
+        "erp_max_input_kW": float(estacao.get("erp_max_input_kW", erp_max_kW)),
         "p_tx_dBW": p_tx_dBW,
         "p_ant_dBW": p_ant_dBW,
         "erp_max_dBW": erp_max_dBW,
         "erp_max_kW": erp_max_kW,
     }
+
+
+
+def calcular_metricas_estacao_modelo(params_tx: dict) -> dict:
+    return resolver_metricas_tx_estacao(params_tx)
 
 
 
@@ -134,7 +155,8 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
     f_tx_center_MHz = float(estacao["frequencia_MHz"])
     site_alt_m = float(estacao["site_alt_m"])
     ant_height_m = float(estacao["ant_height_m"])
-    p_tx_kW = float(estacao["p_tx_kW"])
+    tx_metricas = resolver_metricas_tx_estacao(estacao)
+    p_tx_kW = float(tx_metricas["p_tx_kW"])
     g_t_max_dBd = float(estacao["g_t_max_dBd"])
     tilt_deg = float(estacao["tilt_deg"])
     l_atm_dB = float(estacao["l_atm_dB"])
@@ -155,15 +177,20 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
     f_rx_center_MHz = float(params_rx_sat.get("f_rx_center_MHz", f_tx_center_MHz))
     l_rx_dB = float(params_rx_sat["l_rx_dB"])
     g_r_max_dBi = float(params_rx_sat["g_r_max_dBi"])
-    psi_b_deg = float(params_rx_sat["psi_b_deg"])
+    eta_ap = float(params_rx_sat.get("eta_ap", 0.60))
+    psi_b_deg = resolve_psi_b_deg(
+        gmax_dbi=float(params_rx_sat["g_r_max_dBi"]),
+        psi_b_deg=params_rx_sat.get("psi_b_deg"),
+        eta_ap=eta_ap,
+    )
     ln_db = float(params_rx_sat["ln_db"])
     lf_db = float(params_rx_sat["lf_db"])
-    benchmark_i_over_n_dB = float(params_rx_sat["benchmark_i_over_n_dB"])
+    single_entry_limit_i_over_n_dB = float(
+        params_rx_sat.get("single_entry_limit_i_over_n_dB", params_rx_sat["benchmark_i_over_n_dB"])
+    )
     elev_min_deg = float(params_rx_sat.get("elev_min_deg", 0.0))
     apply_low_elevation_excess_loss = bool(params_rx_sat.get("apply_low_elevation_excess_loss", True))
 
-    if p_tx_kW <= 0.0:
-        raise ValueError("p_tx_kW deve ser positivo.")
     if b_tx_Hz <= 0.0:
         raise ValueError("b_tx_Hz deve ser positivo.")
     if b_rx_Hz <= 0.0:
@@ -178,12 +205,11 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
 
     h_station_m = site_alt_m + ant_height_m
 
-    l_tx_dB = line_att_dB_per_100m * (line_length_m / 100.0) + accessory_losses_dB
-    p_tx_dBW = 10.0 * np.log10(p_tx_kW * 1000.0)
-    p_ant_dBW = p_tx_dBW - l_tx_dB
-
-    erp_max_dBW = p_ant_dBW + g_t_max_dBd
-    erp_max_kW = dBW_to_W(erp_max_dBW) / 1000.0
+    l_tx_dB = float(tx_metricas["l_tx_dB"])
+    p_tx_dBW = float(tx_metricas["p_tx_dBW"])
+    p_ant_dBW = float(tx_metricas["p_ant_dBW"])
+    erp_max_dBW = float(tx_metricas["erp_max_dBW"])
+    erp_max_kW = float(tx_metricas["erp_max_kW"])
 
     tx_f_min_MHz = f_tx_center_MHz - (b_tx_Hz / 1e6) / 2.0
     tx_f_max_MHz = f_tx_center_MHz + (b_tx_Hz / 1e6) / 2.0
@@ -237,6 +263,7 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
         psi_deg=gso_rx_boresight_offaxis_deg,
         gmax_dbi=g_r_max_dBi,
         psi_b_deg=psi_b_deg,
+        eta_ap=eta_ap,
         ln_db=ln_db,
         lf_db=lf_db,
     )
@@ -294,7 +321,7 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
                 i_over_n_dB = i_dBW - n_dBW
                 i0_over_n0_dB = i_density_dBW_per_Hz - n0_dBW_per_Hz
                 delta_t_over_t_pct = 100.0 * (10.0 ** (i_over_n_dB / 10.0))
-                benchmark_ok = bool(i_over_n_dB <= benchmark_i_over_n_dB)
+                benchmark_ok = bool(i_over_n_dB <= single_entry_limit_i_over_n_dB)
                 visibility_reason = "Considerada no estudo."
             else:
                 i_density_dBW_per_Hz = np.nan
@@ -363,10 +390,12 @@ def calcular_interferencia_estacao(estacao: dict, params_rx_sat: dict, tx_patter
         "t_sys_K": t_sys_K,
         "l_rx_dB": l_rx_dB,
         "g_r_max_dBi": g_r_max_dBi,
+        "eta_ap": eta_ap,
         "psi_b_deg": psi_b_deg,
         "ln_db": ln_db,
         "lf_db": lf_db,
-        "benchmark_i_over_n_dB": benchmark_i_over_n_dB,
+        "single_entry_limit_i_over_n_dB": single_entry_limit_i_over_n_dB,
+        "benchmark_i_over_n_dB": single_entry_limit_i_over_n_dB,
         "elev_min_deg": elev_min_deg,
         "apply_low_elevation_excess_loss": apply_low_elevation_excess_loss,
         "r_station_ecef_x_m": r_station_ecef[0],

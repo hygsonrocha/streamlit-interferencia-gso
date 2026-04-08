@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
 from .geometry import geodetic_to_ecef, gso_to_ecef, ecef_to_enu_matrix, unit_vector, angle_between_vectors_deg
-from .antenna import ganho_antena_gso_s672, low_elevation_excess_loss_dB
-from .budget import W_to_dBW, calcular_banda_sobreposta_hz
+from .antenna import ganho_antena_gso_s672, low_elevation_excess_loss_dB, resolve_psi_b_deg
+from .budget import W_to_dBW, calcular_banda_sobreposta_hz, resolver_metricas_tx_estacao
 
 
 DBD_TO_DBI = 2.15
@@ -22,9 +22,17 @@ def calcular_i_agg_total_e_in(
     b_rx_Hz = float(params_rx_sat_base["b_rx_Hz"])
     f_rx_center_MHz = float(params_rx_sat_base.get("f_rx_center_MHz", 300.0))
     l_rx_dB = float(params_rx_sat_base["l_rx_dB"])
-    psi_b_deg = float(params_rx_sat_base["psi_b_deg"])
+    eta_ap = float(params_rx_sat_base.get("eta_ap", 0.60))
+    psi_b_deg = resolve_psi_b_deg(
+        gmax_dbi=float(g_r_max_dBi),
+        psi_b_deg=params_rx_sat_base.get("psi_b_deg"),
+        eta_ap=eta_ap,
+    )
     ln_db = float(params_rx_sat_base["ln_db"])
     lf_db = float(params_rx_sat_base["lf_db"])
+    aggregate_target_i_over_n_dB = float(
+        params_rx_sat_base.get("aggregate_target_i_over_n_dB", params_rx_sat_base["benchmark_i_over_n_dB"])
+    )
     elev_min_deg = float(params_rx_sat_base.get("elev_min_deg", 0.0))
     apply_low_elevation_excess_loss = bool(
         params_rx_sat_base.get("apply_low_elevation_excess_loss", True)
@@ -45,7 +53,8 @@ def calcular_i_agg_total_e_in(
         f_tx_center_MHz = float(estacao["frequencia_MHz"])
         site_alt_m = float(estacao["site_alt_m"])
         ant_height_m = float(estacao["ant_height_m"])
-        p_tx_kW = float(estacao["p_tx_kW"])
+        tx_metricas = resolver_metricas_tx_estacao(estacao)
+        p_tx_kW = float(tx_metricas["p_tx_kW"])
         g_t_max_dBd = float(estacao["g_t_max_dBd"])
         tilt_deg = float(estacao["tilt_deg"])
         l_atm_dB = float(estacao["l_atm_dB"])
@@ -57,8 +66,8 @@ def calcular_i_agg_total_e_in(
         horizontal_discrimination_loss_dB = float(estacao["Eh_dB"])
 
         h_station_m = site_alt_m + ant_height_m
-        l_tx_dB = line_att_dB_per_100m * (line_length_m / 100.0) + accessory_losses_dB
-        p_tx_dBW = 10.0 * np.log10(p_tx_kW * 1000.0)
+        l_tx_dB = float(tx_metricas["l_tx_dB"])
+        p_tx_dBW = float(tx_metricas["p_tx_dBW"])
 
         r_station_ecef = geodetic_to_ecef(lat_deg, lon_deg, h_station_m)
         los_ecef = r_sat_ecef - r_station_ecef
@@ -146,6 +155,7 @@ def calcular_i_agg_total_e_in(
             "n_estacoes_visiveis": 0,
             "i_agg_total_dBW": -np.inf,
             "i_over_n_agg_total_dB": np.nan,
+            "aggregate_target_i_over_n_dB": aggregate_target_i_over_n_dB,
         }
 
     i_agg_total_dBW = W_to_dBW(i_total_W)
@@ -155,6 +165,7 @@ def calcular_i_agg_total_e_in(
         "n_estacoes_visiveis": n_estacoes_visiveis,
         "i_agg_total_dBW": i_agg_total_dBW,
         "i_over_n_agg_total_dB": i_over_n_agg_total_dB,
+        "aggregate_target_i_over_n_dB": aggregate_target_i_over_n_dB,
     }
 
 

@@ -42,13 +42,55 @@ Para cada estação de TV, o app executa os seguintes passos principais:
    - distância inclinada;
    - azimute;
    - elevação;
-4. estima o ganho da antena de TV na direção do satélite, com base no diagrama vertical adotado;
-5. estima o ganho da antena receptora do satélite em função do off-axis;
+4. estima o ganho da antena de TV na direção do satélite, com base em um modelo analítico vertical por elemento e arranjo;
+5. estima o ganho da antena receptora do satélite em função do off-axis, com base em um envelope simplificado inspirado na ITU-R S.672-4;
 6. calcula a perda de espaço livre, com possibilidade de incluir uma perda adicional simplificada em baixa elevação;
 7. calcula a densidade espectral de potência interferente na entrada do receptor do satélite;
 8. integra essa densidade na banda efetivamente sobreposta entre o transmissor e o receptor;
 9. calcula o ruído térmico na banda do receptor, a relação $I/N$ e a grandeza equivalente $\Delta T/T$;
 10. soma as contribuições das estações visíveis para obter o agregado.
+
+---
+
+## Modelos de antena adotados
+
+### Antena TX terrestre
+
+O padrão vertical da antena transmissora é representado por:
+
+$$
+E_{TX}(\theta) = E_{elem}(\theta)\,AF_N(\theta)
+$$
+
+com:
+
+$$
+E_{elem}(\theta)=|\cos(\theta)|^q
+$$
+
+e
+
+$$
+AF_N(\theta)=\left|\frac{1}{W}\sum_{m=0}^{N-1} w_m\,e^{j m\left(2\pi d_{\lambda}\sin(\theta)+\beta\right)}\right|
+$$
+
+onde $N$ é o número de níveis, $d_{\lambda}$ é o espaçamento vertical em comprimentos de onda, $w_m$ são os pesos de amplitude, $\beta$ representa o tilt elétrico e $W=\sum_m w_m$.
+
+No projeto, o parâmetro $q$ é calibrado para reproduzir a HPBW vertical de 1 nível do datasheet, e o arranjo com $N=1,2,4,6$ níveis é ajustado para aproximar as larguras de feixe de referência.
+
+### Antena RX do satélite GSO
+
+O padrão RX do satélite é modelado por um envelope simplificado inspirado na Recomendação ITU-R S.672-4 para feixe circular simples. O ganho é função do ângulo off-axis $\psi$ e do ganho máximo $G_{max}$.
+
+Quando $\psi_b$ não é informado explicitamente, ele é estimado a partir de $G_{max}$ e da eficiência de abertura $\eta_{ap}$ por:
+
+$$
+\psi_b \approx 36\pi\sqrt{\eta_{ap}}\,10^{-G_{max}/20}
+$$
+
+com $\psi_b$ em graus e $G_{max}$ em dBi.
+
+A partir disso, o ganho RX é obtido por uma lei por trechos em função de $\psi$, com parâmetros $L_N$ e $L_F$ que controlam o platô lateral e o piso de lóbulos distantes do envelope adotado.
 
 ---
 
@@ -92,7 +134,7 @@ O ganho transmissor na direção do satélite é calculado a partir de:
 
 - ganho máximo da antena;
 - discriminação horizontal adicional;
-- diagrama vertical adotado no estudo.
+- modelo analítico vertical adotado no estudo.
 
 No app, esse ganho aparece como:
 
@@ -279,8 +321,8 @@ O modelo atual utiliza as seguintes hipóteses principais:
 - satélite **GSO ideal**;
 - análise **estática** por geometria;
 - foco em **interferência agregada cocanal**;
-- ganho da antena de TV estimado a partir de um diagrama vertical baseado na Recomendação ITU-R BT.1195-1;
-- ganho RX do satélite obtido a partir de um modelo baseado na Recomendação ITU-R S.672-4;
+- ganho da antena de TV estimado a partir de um modelo analítico vertical com fator de elemento e fator de arranjo calibrado pelos valores de HPBW do datasheet;
+- ganho RX do satélite obtido por um envelope simplificado inspirado na Recomendação ITU-R S.672-4, com $\psi_b$ explícito ou calculado a partir de $G_{max}$ e $\eta_{ap}$;
 - polarização representada por uma **perda global de mismatch**;
 - possibilidade de aplicar uma **perda adicional em baixa elevação**;
 - cálculo da interferência a partir da densidade espectral de potência interferente integrada na banda efetivamente sobreposta;
@@ -298,7 +340,7 @@ O efeito de polarização é tratado de forma simplificada por uma perda global 
 
 ### 2. Não usa, por enquanto, diagrama horizontal detalhado da antena de TV
 
-O ganho transmissor é obtido a partir do ganho máximo da antena, de uma discriminação horizontal adicional e de um diagrama vertical baseado na Recomendação ITU-R BT.1195-1. Assim, o modelo ainda não representa explicitamente um diagrama horizontal detalhado da antena real da estação.
+O ganho transmissor é obtido a partir do ganho máximo da antena, de uma discriminação horizontal adicional e de um modelo analítico vertical da forma $E_{TX}(\theta)=E_{elem}(\theta)AF_N(\theta)$, calibrado pelos valores de HPBW do datasheet. Assim, o modelo ainda não representa explicitamente um diagrama horizontal detalhado da antena real da estação.
 
 ### 3. O agregado total só é estritamente cocanal se todas as estações estiverem na mesma frequência
 
@@ -306,7 +348,7 @@ Se o usuário inserir estações com múltiplas frequências, o app avisa que o 
 
 ### 4. O modelo de antena do satélite é simplificado
 
-O ganho RX do satélite é obtido por um modelo analítico em função do ângulo off-axis, baseado na Recomendação ITU-R S.672-4. Ainda assim, trata-se de uma representação simplificada do comportamento da antena receptora do satélite no contexto deste estudo preliminar.
+O ganho RX do satélite é obtido por um envelope analítico em função do ângulo off-axis, inspirado na Recomendação ITU-R S.672-4. O parâmetro $\psi_b$ pode ser fornecido diretamente ou calculado a partir de $G_{max}$ e $\eta_{ap}$. Ainda assim, trata-se de uma representação simplificada do comportamento da antena receptora do satélite no contexto deste estudo preliminar.
 
 ### 5. O resultado não deve ser interpretado como conclusão regulatória definitiva
 
@@ -419,6 +461,8 @@ Nesta aba, o usuário visualiza:
 #### Antena do satélite GSO
 - diagrama em **escala linear**
 - diagrama em **dB**
+- indicação do valor de $\psi_b$ efetivamente usado no modelo
+- indicação do valor de $\psi_b$ efetivamente usado no modelo
 
 Se o cenário único já tiver sido rodado, os gráficos também mostram os **pontos correspondentes às estações visíveis** sobre as curvas dos diagramas.
 
